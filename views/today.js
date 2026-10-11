@@ -2,7 +2,7 @@
 // market pulse; then the stories, what's working in video, questions, dates, industry, and the footer. Sections with nothing in them
 // are left out. The cached briefing shows at once and is refreshed quietly, and again whenever the app comes to the front.
 import * as store from "../store.js";
-import { api, event, ApiError } from "../api.js";
+import { api, write, followJob, writerNote, event, ApiError } from "../api.js";
 import { go, link } from "../router.js";
 import {
   h, icon, replace, button, iconButton, chip, notice, section, sheet, closeSheet, extLink, toast, videoCard, skeleton, ideaChips,
@@ -12,6 +12,46 @@ import { easternDate, easternParts, clock12, shortDate, weekdayShort, daysBetwee
 
 const LONG_DATE = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric" });
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// her first move, written on the spot after the five questions (design §3.7 step 5): three ideas, then the first one's script. One chain
+// however often Today is opened; with the Mac's writer each step is a job on the phone's list (contract §8.3), so after a reload the
+// chain picks up at the step it was on. firstMove's `note` is the writer-away sentence while it waits.
+let firstChain = null;
+let firstChanged = null;            // the mounted Today's redraw
+const openFirst = day => store.jobs().find(j => j.kind === "first" && j.day === day) || null;
+function runFirst(day, open = null) {
+  if (firstChain) return firstChain;
+  const onState = s => {
+    const note = writerNote(s.writer), fm = store.get("firstMove") || {};
+    if ((fm.note || null) !== note && fm.date === day && fm.state === "writing") { store.set("firstMove", { ...fm, note }); if (firstChanged) firstChanged(); }
+  };
+  firstChain = (async () => {
+    try {
+      let ideaId, others;
+      if (open && open.step === "script") { ideaId = open.ideaId; others = open.others || []; }
+      else {
+        const p = store.profile();
+        const r = open ? await followJob(open.id, { onState })
+          : await write("POST", "/ideas", { mode: "first", options: p.defaults || undefined }, { onState, meta: { kind: "first", step: "ideas", day } });
+        const rows = (r && r.ideas) || [];
+        store.saveIdeas(rows);
+        if (!rows.length) throw new ApiError("busy");
+        ideaId = rows[0].id; others = rows.slice(1).map(x => x.id);
+      }
+      const s = open && open.step === "script" ? await followJob(open.id, { onState })
+        : await write("POST", `/ideas/${encodeURIComponent(ideaId)}/script`, {}, { onState, meta: { kind: "first", step: "script", ideaId, others, day } });
+      if (s && s.idea) { store.saveIdea(s.idea); ideaId = s.idea.id; }
+      store.set("firstMove", { date: day, state: "done", ideaId, others, at: Date.now() });
+      event("script");
+    } catch (e) {
+      store.set("firstMove", { date: day, state: e.kind === "not_connected" ? "off" : "failed", reason: e.reason, at: Date.now() });
+    } finally {
+      firstChain = null;
+      if (firstChanged) firstChanged();
+    }
+  })();
+  return firstChain;
+}
 
 export default {
   async mount(root, route) {
@@ -98,17 +138,20 @@ export default {
     }
 
     // ---------------------------------------------------------------- Today's move (or her first move, made on the spot)
+    // "writing" for more than 3 minutes with nothing on its way (no chain here, no job on the phone's list) has failed
     function firstMove() {
       const fm = store.get("firstMove");
       if (!fm || fm.date !== today) return null;
-      if (fm.state === "writing" && Date.now() - (fm.at || 0) > 3 * 60 * 1000) return { ...fm, state: "failed" };
+      if (fm.state === "writing" && Date.now() - (fm.at || 0) > 3 * 60 * 1000 && !firstChain && !openFirst(today)) return { ...fm, state: "failed" };
       return fm;
     }
     function moveCard(b, fm) {
       if (fm && fm.state === "writing") {
         return h("section", { class: "move", "aria-label": "Your first move", "aria-busy": "true" },
           h("span", { class: "rider", text: "Your first move" }),
-          h("p", { class: "writing-line" }, h("span", { class: "dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")), "Jarvis is writing your first move… usually 20–40 seconds"),
+          h("p", { class: "writing-line" }, h("span", { class: "dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")),
+            fm.note ? "Waiting for Jarvis's writer…" : "Jarvis is writing your first move… usually 20–40 seconds"),
+          fm.note ? notice(fm.note, { kind: "calm", icon: "info" }) : null,
           skeleton(4));
       }
       if (fm && (fm.state === "failed" || fm.state === "off") && !(b && b.move)) {
@@ -408,35 +451,28 @@ export default {
       }
     }
 
-    // her first move, written on the spot after the five questions (design §3.7 step 5)
+    // her first move (runFirst above): started after the five questions, again with Try again, or picked up after a reload
     async function startFirstMove(retry = false) {
       const fm = store.get("firstMove");
-      if (fm && fm.date === today && !retry && (fm.state === "done" || (fm.state === "writing" && Date.now() - (fm.at || 0) < 3 * 60 * 1000))) return;
+      if (firstChain) return;
+      if (fm && fm.date === today && !retry && (fm.state === "done" || (fm.state === "writing" && (Date.now() - (fm.at || 0) < 3 * 60 * 1000 || openFirst(today))))) return;
       if (store.aiOff()) { store.set("firstMove", { date: today, state: "off", at: Date.now() }); draw(); return; }
       store.set("firstMove", { date: today, state: "writing", at: Date.now() });
       draw();
-      try {
-        const p = store.profile();
-        const r = await api("POST", "/ideas", { mode: "first", options: p.defaults || undefined }, { timeout: 90000 });
-        const rows = (r && r.ideas) || [];
-        store.saveIdeas(rows);
-        if (!rows.length) throw new ApiError("busy");
-        let row = rows[0];
-        const s = await api("POST", `/ideas/${encodeURIComponent(row.id)}/script`, {}, { timeout: 90000 });
-        if (s && s.idea) { row = s.idea; store.saveIdea(row); }
-        store.set("firstMove", { date: today, state: "done", ideaId: row.id, others: rows.slice(1).map(x => x.id), at: Date.now() });
-        event("script");
-      } catch (e) {
-        store.set("firstMove", { date: today, state: e.kind === "not_connected" ? "off" : "failed", reason: e.reason, at: Date.now() });
-      }
-      draw();
+      await runFirst(today);
     }
 
+    const redraw = () => draw();
+    firstChanged = redraw;
     draw();
     const offs = [store.on("front", () => { draw(); load(); }), store.on("online", on => { draw(); if (on) load(); })];
     load();
     if (route.query.first === "1") { history.replaceState(history.state, "", "#/today"); startFirstMove(); }
-    return () => { alive = false; offs.forEach(f => f()); };
+    else {
+      const fm = store.get("firstMove"), open = openFirst(today);
+      if (!firstChain && open && fm && fm.state === "writing" && fm.date === today) runFirst(today, open);
+    }
+    return () => { alive = false; offs.forEach(f => f()); if (firstChanged === redraw) firstChanged = null; };
   },
 };
 

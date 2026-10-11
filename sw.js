@@ -4,9 +4,10 @@
 // once while offline still works). The install is all or nothing: if one file fails, this build doesn't install, the build she has
 // keeps working (and its cache), and the browser tries again later. The API is never cached here: the app keeps its own copies on the
 // phone (localStorage), so an answer the page sees is always the server's own, and a failure is a failure it can show. A push (empty,
-// no payload) fetches the morning headline with her token from IndexedDB within 5 s and always shows a notification, as Safari
-// requires; a tap opens Today.
-const BUILD = "dd86cca";                       // stamped by tools/deploy.sh with the source commit
+// no payload) first asks the Worker, with her token from IndexedDB, whether a script or ideas the Mac's writer finished while she was
+// away are what it's about (GET /jobs/ready, contract §8.3): then "Your script is ready", and a tap opens it. Otherwise it fetches the
+// morning headline, and a tap opens Today. Both within about 5 s, and a notification is always shown, as Safari requires.
+const BUILD = "1a320fd";                       // stamped by tools/deploy.sh with the source commit
 const CACHE = "jarvis-" + BUILD;
 const DEV = BUILD === "dev";
 // every file of the site (written by tools/deploy.sh); on this Mac, the shell only, and the rest is cached as it is used
@@ -93,23 +94,44 @@ function kv(keys) {
     };
   });
 }
-async function headline() {
+// ask(path, ms): the Worker's JSON answer with her token, or null (no token, a failure, or past ms)
+async function ask(path, ms) {
   const { token, api } = await kv(["token", "api"]);
-  if (!token || !api || !/^https?:\/\//.test(api)) return null;
+  if (!token || !api || !/^https?:\/\//.test(api) || ms <= 0) return null;
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 5000);
+  const t = setTimeout(() => ctrl.abort(), ms);
   try {
-    const r = await fetch(api + "/briefing/today?headline=1", { headers: { Authorization: "Bearer " + token }, signal: ctrl.signal, cache: "no-store" });
-    if (!r.ok) return null;
-    const j = await r.json();
-    return j && typeof j.headline === "string" && j.headline.trim() ? j.headline.trim() : null;
+    const r = await fetch(api + path, { headers: { Authorization: "Bearer " + token }, signal: ctrl.signal, cache: "no-store" });
+    return r.ok ? await r.json() : null;
   } catch { return null; } finally { clearTimeout(t); }
+}
+async function headline(ms) {
+  const j = await ask("/briefing/today?headline=1", ms);
+  return j && typeof j.headline === "string" && j.headline.trim() ? j.headline.trim() : null;
+}
+// a job the writer finished in the last five minutes, its push not yet shown: { id, route, ideaId, title, doneAt }, or null
+async function readyJob(ms) {
+  const j = await ask("/jobs/ready", ms);
+  return j && j.job && typeof j.job.id === "string" ? j.job : null;
 }
 self.addEventListener("push", e => {
   e.waitUntil((async () => {
+    const until = Date.now() + 5000;
     let text = null;
     try { const d = e.data && e.data.text(); if (d) { try { const j = JSON.parse(d); text = j.headline || j.body || null; } catch { text = d; } } } catch { /* an empty push */ }
-    if (!text) text = await headline();
+    if (!text) {
+      const job = await readyJob(until - Date.now());
+      if (job) {
+        const isScript = /^script\./.test(String(job.route || "")) && job.ideaId;
+        await self.registration.showNotification(isScript ? "Your script is ready" : "Your ideas are ready", {
+          body: (typeof job.title === "string" && job.title.trim()) || (isScript ? "Open it to read it over." : "They're waiting in your Studio."),
+          icon: "icons/icon-192.png", badge: "icons/icon-192.png", tag: "job-" + job.id, renotify: false,
+          data: { hash: isScript ? "#/idea/" + encodeURIComponent(job.ideaId) : "#/studio" },
+        });
+        return;
+      }
+      text = await headline(Math.max(1500, until - Date.now()));
+    }
     await self.registration.showNotification("Good morning ☀️", {
       body: text || "Your Lake Mary briefing is ready",
       icon: "icons/icon-192.png", badge: "icons/icon-192.png", tag: "morning", renotify: false, data: { hash: "#/today" },

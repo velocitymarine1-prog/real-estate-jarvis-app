@@ -414,6 +414,7 @@ table.values tr.latest td { font-weight: 700; color: var(--lake); }
 .results-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 26px 0 12px; }
 .results-head .eyebrow { margin: 0; }
 .writing-line { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 15.5px; }
+.writer-note { margin: 0 0 12px; }          /* the Mac's writer away: offline, or resting until a time (contract §8.3) */
 .dots { display: inline-flex; gap: 4px; }
 .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--lake); animation: blink 1.2s infinite ease-in-out; }
 .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; }

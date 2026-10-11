@@ -1,9 +1,9 @@
 // studio.js: anything in, ideas out (design §3.4). Four modes (Ideas, From a listing, Remix a video, Plan my week), one-tap seeds
 // from today's brief, the options row (platform, length, how she appears; defaults from her profile), and idea cards with Write
 // script, Save and thumbs. States (§3.20): writing (skeletons and Cancel), busy (Try again, her text kept), declined, an unreadable
-// link, writing not switched on yet, offline.
+// link, writing not switched on yet, offline; with the Mac's writer (contract §8.3), the writer away (offline, or resting until a time).
 import * as store from "../store.js";
-import { api, SENTENCES } from "../api.js";
+import { api, write, followJob, writerNote, SENTENCES } from "../api.js";
 import { go, link } from "../router.js";
 import {
   h, icon, replace, button, iconButton, choice, chip, notice, sheet, closeSheet, toast, skeleton, ideaChips, setPressed,
@@ -13,8 +13,56 @@ import { easternDate, shortDate, weekdayShort } from "../shared/time.js";
 
 const MODES = [["topic", "Ideas"], ["listing", "From a listing"], ["remix", "Remix a video"], ["week", "Plan my week"]];
 // ideas being written: kept here, not on the page, so leaving the Studio doesn't throw away ideas already paid for. Coming back while
-// they're on their way shows the writing state; once they land they're the Studio's results (also saved for the next visit)
+// they're on their way shows the writing state; once they land they're the Studio's results (also saved for the next visit). With the
+// Mac's writer the request is a job the phone keeps too (store.jobs), so after a reload the Studio waits on it again; one she stopped
+// waiting for (Cancel) is followed quietly, and its ideas become the Studio's results when they land (unless she has asked again).
 let inflight = null;
+const quiet = new Map();            // job id → its quiet follow
+let quietLanded = null;             // the mounted Studio's hook for ideas a quiet job brought
+
+function landIdeas(r, meta) {
+  const rows = (r && r.ideas) || [];
+  store.saveIdeas(rows);
+  if (meta.text && (meta.mode === "topic" || meta.mode === "listing")) for (const x of rows) store.noteUserText(x.id, meta.text);
+  return { ids: rows.map(x => x.id), mode: meta.mode, label: meta.label };
+}
+// track(meta, start): a request for ideas the page waits on; start(signal, onState) → the answer. note: the writer-away sentence
+function track(meta, start) {
+  const job = { ctrl: new AbortController(), mode: meta.mode, label: meta.label, meta, id: meta.id || null, note: null, error: null, results: null, onChange: null };
+  const onState = s => {
+    if (s.job && s.job.id) job.id = s.job.id;
+    const note = writerNote(s.writer);
+    if (note !== job.note) { job.note = note; if (job.onChange) job.onChange(); }
+  };
+  job.promise = (async () => {
+    try {
+      job.results = landIdeas(await start(job.ctrl.signal, onState), meta);
+      store.set("studio", { ...(store.get("studio") || {}), results: job.results });
+    } catch (e) {
+      if (e.kind !== "aborted") job.error = e;
+    } finally { if (inflight === job) inflight = null; }
+  })();
+  return job;
+}
+function followQuiet(meta) {
+  if (!meta || !meta.id || quiet.has(meta.id)) return;
+  store.updateJob(meta.id, { quiet: true });
+  quiet.set(meta.id, followJob(meta.id).then(r => {
+    const results = landIdeas(r, meta);
+    if (inflight) return;                                         // she has asked again since: these wait in her ideas
+    if (!(quietLanded && quietLanded(results))) store.set("studio", { ...(store.get("studio") || {}), results });
+  }, () => { /* failed or expired: it has left the list, and there's nothing to show */ }).finally(() => quiet.delete(meta.id)));
+}
+// the requests still open on the phone (after a reload): the newest one she was waiting on is waited on again, the rest quietly
+function resume() {
+  const open = store.jobs().filter(j => j.kind === "ideas" && !quiet.has(j.id) && !(inflight && inflight.id === j.id));
+  const waiting = open.filter(j => !j.quiet).sort((a, b) => (b.at || 0) - (a.at || 0));
+  if (!inflight && waiting.length) {
+    const m = waiting.shift();
+    inflight = track(m, (signal, onState) => followJob(m.id, { signal, onState }));
+  }
+  for (const j of [...waiting, ...open.filter(j => j.quiet)]) followQuiet(j);
+}
 const LENGTHS = [15, 30, 45, 60, 90];
 const LISTING_MAX = 4000, TOPIC_MAX = 500;
 
@@ -175,20 +223,27 @@ export default {
     function statusNote() {
       if (store.aiOff()) return notice(SENTENCES.not_connected, { kind: "calm", sub: "Your saved ideas and scripts still open, Today still comes each morning, and the prompter reads any text." });
       if (!store.live.online) return notice("You're offline. Writing needs a connection; your saved ideas still open.", { kind: "calm", icon: "offline" });
-      if (!st.error) return null;
-      const e = st.error;
-      const retry = ["busy", "network", "other"].includes(e.kind) ? button("Try again", { kind: "lake", icon: "refresh", onClick: run }) : null;
-      return notice(e.reason, { kind: e.kind === "declined" || e.kind === "bad_link" ? "warn" : "error", icon: "info", action: retry });
+      if (st.error) {
+        const e = st.error;
+        const retry = ["busy", "network", "other"].includes(e.kind) ? button("Try again", { kind: "lake", icon: "refresh", onClick: run }) : null;
+        return notice(e.reason, { kind: e.kind === "declined" || e.kind === "bad_link" ? "warn" : "error", icon: "info", action: retry });
+      }
+      // the Mac's writer away before she asks (the last word from the Worker, if it's recent): asking still works, it waits
+      const away = !st.busy && writerNote(store.writerFresh(), { before: true });
+      return away ? notice(away, { kind: "calm", icon: "info" }) : null;
     }
 
     // ---------------------------------------------------------------- results
     function results() {
       if (st.busy) {
+        const job = inflight, note = job && job.note;
+        const week = job ? job.mode === "week" : st.mode === "week" && !st.seed;
         return h("div", { "aria-busy": "true" },
           h("div", { class: "results-head" },
             h("p", { class: "writing-line" }, h("span", { class: "dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")),
-              st.mode === "week" && !st.seed ? "Jarvis is planning your week… usually 15–30 seconds" : "Jarvis is writing your ideas… usually 10–20 seconds"),
+              note ? "Waiting for Jarvis's writer…" : week ? "Jarvis is planning your week… usually 15–30 seconds" : "Jarvis is writing your ideas… usually 10–20 seconds"),
             button("Cancel", { kind: "ghost", onClick: cancel })),
+          note ? h("div", { class: "writer-note" }, notice(note, { kind: "calm", icon: "info" })) : null,
           h("div", { class: "stack" }, [0, 1, 2].map(() => h("div", { class: "card idea" }, skeleton(4)))));
       }
       const r = st.results;
@@ -257,26 +312,16 @@ export default {
       } else {
         body.mode = "week"; label = "Your week";
       }
-      const job = { ctrl: new AbortController(), mode: body.mode, label, error: null, results: null };
-      job.promise = (async () => {
-        try {
-          const r = await api("POST", "/ideas", body, { signal: job.ctrl.signal, timeout: 90000 });
-          const rows = (r && r.ideas) || [];
-          store.saveIdeas(rows);
-          if (body.text && (body.mode === "topic" || body.mode === "listing")) for (const x of rows) store.noteUserText(x.id, body.text);
-          job.results = { ids: rows.map(x => x.id), mode: body.mode, label };
-          store.set("studio", { ...(store.get("studio") || {}), results: job.results });
-        } catch (e) {
-          if (e.kind !== "aborted") job.error = e;
-        } finally { if (inflight === job) inflight = null; }
-      })();
+      const meta = { kind: "ideas", mode: body.mode, label, text: body.mode === "topic" || body.mode === "listing" ? body.text : undefined };
+      const job = track(meta, (signal, onState) => write("POST", "/ideas", body, { signal, onState, meta }));
       inflight = job;
       st.busy = true; st.error = null;
       redrawStatus();
       await follow(job);
     }
-    // the page waits for ideas being written (started here, or before she left and came back)
+    // the page waits for ideas being written (started here, or before she left and came back, or before a reload)
     async function follow(job) {
+      job.onChange = () => { if (alive && st.busy && inflight === job) replace(els.results, results()); };
       await job.promise;
       st.busy = false;
       if (job.results) st.results = job.results;
@@ -297,7 +342,14 @@ export default {
       for (const c of root.querySelectorAll(".seeds .choice")) c.disabled = !!blocked();
       if (!st.busy) replace(els.results, results());
     }
-    function cancel() { if (inflight) inflight.ctrl.abort(); }
+    // Cancel: this phone stops waiting. A request the Mac's writer has as a job can't be taken back, so it's followed quietly and its
+    // ideas show up here when they land; a request written inline is simply dropped
+    function cancel() {
+      const job = inflight;
+      if (!job) return;
+      job.ctrl.abort();
+      if (job.id) { followQuiet({ ...job.meta, id: job.id }); toast("Stopped waiting. Jarvis still writes them, and they'll show up here."); }
+    }
 
     async function toggleSave(row) {
       const inPlan = ["saved", "scripted", "filmed", "posted"].includes(row.status);
@@ -346,9 +398,17 @@ export default {
 
     draw();
     const offs = [store.on("online", controls), store.on("health", controls)];
+    const landed = results => {
+      if (!alive) return false;
+      st.results = results; persist();
+      if (!st.busy) { draw(); toast("Your ideas are here"); }
+      return true;
+    };
+    quietLanded = landed;
+    if (!inflight && q.go !== "1") resume();
     if (inflight) { st.busy = true; redrawStatus(); follow(inflight); }
-    else if (q.go === "1") { history.replaceState(history.state, "", "#/studio"); if (!blocked()) run(); }
-    return () => { alive = false; offs.forEach(f => f()); };
+    else if (q.go === "1") { history.replaceState(history.state, "", "#/studio"); if (!blocked()) run(); resume(); }
+    return () => { alive = false; offs.forEach(f => f()); if (quietLanded === landed) quietLanded = null; };
   },
 };
 

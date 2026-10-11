@@ -4,7 +4,7 @@
 // Every line is editable; edits are saved (PATCH, debounced) and the check runs again as she types, in the browser, with the same
 // module the Worker uses (shared/compliance.js and data/fair-housing.json).
 import * as store from "../store.js";
-import { api, event, SENTENCES } from "../api.js";
+import { api, write, followJob, writerNote, event, SENTENCES } from "../api.js";
 import { go, link } from "../router.js";
 import {
   h, icon, replace, button, iconButton, chip, choice, notice, sheet, closeSheet, toast, skeleton, ideaChips, autogrow, copyText,
@@ -15,6 +15,21 @@ import { TWEAKS, TWEAK_LABELS } from "../shared/models.js";
 import { checker } from "../rules.js";
 
 const PLAN_STATUSES = ["saved", "scripted", "filmed", "posted"];
+// scripts being written, by idea: one wait each, however often the page is opened (leaving and coming back finds it here; after a
+// reload, the phone's list of jobs, contract §8.3). A version that lands is kept on the phone even if the page has gone.
+const writing = new Map();          // idea id → { promise, base, note, listeners }
+function startWriting(ideaId, base, start) {
+  const w = { base, note: null, listeners: new Set() };
+  const onState = s => {
+    const note = writerNote(s.writer);
+    if (note !== w.note) { w.note = note; for (const fn of w.listeners) fn(); }
+  };
+  w.promise = start(onState)
+    .then(r => { if (r && r.idea) store.saveIdea(r.idea, { clean: true }); return r; })
+    .finally(() => { if (writing.get(ideaId) === w) writing.delete(ideaId); });
+  writing.set(ideaId, w);
+  return w;
+}
 const STANDING = "This catches common problems. It isn't legal advice, and your broker's rules come first.";
 const clone = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 
@@ -57,13 +72,20 @@ export default {
           ideaChips({ ...idea, lengthSec: (s && s.lengthSec) || idea.lengthSec }),
           els.save = h("p", { class: "save-state", "aria-live": "polite", text: st.saveNote }),
           s && s.notes && s.notes.length ? h("ul", { class: "script-notes" }, s.notes.map(n => h("li", { text: n }))) : null),
-        st.writing ? h("div", { class: "part" }, notice(st.writing, { icon: "sparkle", kind: "calm" }), s ? null : skeleton(6)) : null,
+        st.writing ? (els.writing = h("div", { class: "part writing-part" }, writingNotice(), s ? null : skeleton(6))) : null,
         st.error ? h("div", { class: "part" }, notice(st.error.reason, { kind: st.error.kind === "declined" ? "warn" : "error", icon: "info",
           action: ["busy", "network", "other"].includes(st.error.kind) ? button("Try again", { kind: "lake", icon: "refresh", onClick: () => (st.error.retry || writeScript)() }) : null })) : null,
         s ? scriptParts(s) : noScript(),
       );
       drawBar();
       if (y) window.scrollTo(0, y);
+    }
+    // what's being written, or (the Mac's writer away) why it waits; changed in place, so the page under it stays as it is
+    function writingNotice() { return notice(st.writing, { icon: st.writingAway ? "info" : "sparkle", kind: "calm" }); }
+    function updateWriting() {
+      if (!alive) return;
+      if (els.writing && els.writing.isConnected) replace(els.writing, writingNotice(), st.work ? null : skeleton(6));
+      else drawAll();
     }
     function backLink() {
       const label = from === "today" ? "Today" : from === "plan" ? "Plan" : "Studio";
@@ -277,35 +299,56 @@ export default {
       sheet("Your own note", h("div", { class: "stack" }, h("p", { class: "muted", text: "One line on what to change. Jarvis rewrites the script with it." }), inp, goBtn));
       setTimeout(() => inp.focus(), 260);
     }
+    const tweakLine = label => `Jarvis is writing the “${label}” version… usually 15–30 seconds`;
+    const SCRIPT_LINE = "Writing the script… usually 15–30 seconds";
     async function tweak(t, note) {
       if (st.writing) return;
       await flush();
       const label = TWEAK_LABELS[t] || t;
-      st.writing = `Jarvis is writing the “${label}” version… usually 15–30 seconds`; st.error = null;
-      drawAll(); window.scrollTo({ top: 0, behavior: "smooth" });
-      try {
-        const r = await api("POST", `/ideas/${encodeURIComponent(id)}/script`, note ? { tweak: t, note } : { tweak: t }, { timeout: 90000 });
-        st.writing = null;
-        if (r && r.idea) { setRow(r.idea, true); toast(`New version: ${label}`); }
-      } catch (e) {
-        st.writing = null;
-        st.error = e.kind === "aborted" ? null : Object.assign(e, { retry: () => tweak(t, note) });
-        drawAll();
-      }
+      const w = writing.get(id) || startWriting(id, tweakLine(label), onState =>
+        write("POST", `/ideas/${encodeURIComponent(id)}/script`, note ? { tweak: t, note } : { tweak: t }, { onState, meta: { kind: "script", ideaId: id, label, tweak: t } }));
+      const waited = waitOn(w, { done: () => toast(`New version: ${label}`), retry: () => tweak(t, note) });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      await waited;
     }
-    async function writeScript() {
+    function writeScript() {
       if (st.writing) return;
-      st.writing = "Writing the script… usually 15–30 seconds"; st.error = null;
+      const w = writing.get(id) || startWriting(id, SCRIPT_LINE, onState =>
+        write("POST", `/ideas/${encodeURIComponent(id)}/script`, {}, { onState, meta: { kind: "script", ideaId: id } }));
+      return waitOn(w, { done: () => event("script"), retry: writeScript });
+    }
+    // the page waits on a script being written (asked for here, before she left and came back, or before a reload)
+    async function waitOn(w, { done, retry }) {
+      const show = () => {
+        const text = w.note || w.base;
+        if (text === st.writing) return;
+        st.writing = text; st.writingAway = !!w.note; updateWriting();
+      };
+      st.writing = w.note || w.base; st.writingAway = !!w.note; st.error = null;
+      w.listeners.add(show);
       drawAll();
       try {
-        const r = await api("POST", `/ideas/${encodeURIComponent(id)}/script`, {}, { timeout: 90000 });
+        const r = await w.promise;
         st.writing = null;
-        if (r && r.idea) { setRow(r.idea, true); event("script"); }
+        if (!alive) return;
+        if (r && r.idea) { setRow(r.idea, true); if (done) done(); } else drawAll();
       } catch (e) {
         st.writing = null;
-        st.error = e.kind === "aborted" ? null : Object.assign(e, { retry: writeScript });
+        if (!alive) return;
+        st.error = e.kind === "aborted" ? null : Object.assign(e, { retry });
         drawAll();
-      }
+      } finally { w.listeners.delete(show); }
+    }
+    // a script for this idea still being written: in this phone's memory, or a job on its list
+    function resumeWriting() {
+      if (st.writing) return true;
+      const w = writing.get(id);
+      if (w) { waitOn(w, { retry: writeScript }); return true; }
+      const open = store.jobs().find(j => j.kind === "script" && j.ideaId === id);
+      if (!open) return false;
+      const retry = !open.tweak ? writeScript : open.tweak === "note" ? noteSheet : () => tweak(open.tweak);
+      waitOn(startWriting(id, open.label ? tweakLine(open.label) : SCRIPT_LINE, onState => followJob(open.id, { onState })), { retry });
+      return true;
     }
 
     // ---------------------------------------------------------------- saving
@@ -436,6 +479,7 @@ export default {
     }
 
     drawAll();
+    resumeWriting();
     const { C, R } = await checker();
     if (!alive) return () => {};
     st.C = C; st.R = R;

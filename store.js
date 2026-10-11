@@ -1,7 +1,7 @@
 // store.js: what the app keeps on her phone (design §3.16, §3.18), and the little live state the views share.
 //   localStorage "jarvis:*": the token, her user and profile, the last seven briefings, her ideas, Studio's last results, the
-//   prompter's speed and size, the first move. IndexedDB "jarvis" (store "kv"): the token and the API's address again, because the
-//   service worker can't read localStorage and needs both to fetch the morning headline for the push.
+//   prompter's speed and size, the first move, the writing jobs still open. IndexedDB "jarvis" (store "kv"): the token and the API's
+//   address again, because the service worker can't read localStorage and needs both to fetch the morning headline for the push.
 const P = "jarvis:";
 
 export function get(key, fallback = null) {
@@ -94,6 +94,36 @@ export function firstName() { const p = profile(); return (p.firstName || (live.
 export function setHealth(h) { live.health = { ...h, at: Date.now() }; set("health", live.health); emit("health", live.health); }
 // writing is off only when the Worker said so (no key yet); unknown counts as on, so an offline phone still tries
 export function aiOff() { return !!(live.health && live.health.ai === false); }
+// the Mac's writer as the Worker last described it (contract §8.2 WriterState: { mode, online, seen, resting }), or null (writing
+// inline, or not known yet). A job's answer brings a fresher one than /health; "health" is emitted only when what she'd read changes.
+export function writer() { return (live.health && live.health.writer) || null; }
+export function setWriter(w) {
+  if (!w || typeof w !== "object") return;
+  const was = writer();
+  const sig = x => (x ? `${x.online !== false}|${x.resting || ""}` : "");
+  live.health = { ...(live.health || {}), writer: w, writerAt: Date.now() };
+  set("health", live.health);
+  if (sig(was) !== sig(w)) emit("health", live.health);
+}
+// the writer as last heard in the past 15 minutes (what a note before she asks may rely on), else null
+export function writerFresh() {
+  const hl = live.health;
+  return hl && hl.writer && Date.now() - Math.max(Number(hl.at) || 0, Number(hl.writerAt) || 0) < 15 * 60 * 1000 ? hl.writer : null;
+}
+
+// ------------------------------------------------------------------ writing jobs (contract §8.3)
+// In writer mode a request to write is a job on the Worker, done by the Mac's writer. The phone keeps the open ones here ("jarvis:jobs":
+// { id, kind: ideas | script | first, ideaId?, label?, mode?, text?, step?, quiet?, at }), so a closed and reopened app picks up where it
+// was; a job leaves the list when it lands, fails or expires, and is forgotten after 13 hours (the Worker expires it at 12).
+const JOB_TTL = 13 * 3600 * 1000;
+export function jobs() {
+  const all = get("jobs", []), now = Date.now();
+  return (Array.isArray(all) ? all : []).filter(j => j && typeof j.id === "string" && now - (Number(j.at) || 0) < JOB_TTL);
+}
+export function job(id) { return jobs().find(j => j.id === id) || null; }
+export function addJob(j) { if (!j || !j.id) return; set("jobs", [...jobs().filter(x => x.id !== j.id), { at: Date.now(), ...j }]); }
+export function updateJob(id, patch) { set("jobs", jobs().map(j => (j.id === id ? { ...j, ...patch } : j))); }
+export function dropJob(id) { set("jobs", jobs().filter(j => j.id !== id)); }
 
 // ------------------------------------------------------------------ briefings: the last seven days
 export function saveBriefing(answer) {
