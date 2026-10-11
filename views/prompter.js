@@ -7,7 +7,7 @@
 import * as store from "../store.js";
 import { api, event } from "../api.js";
 import { go, link } from "../router.js";
-import { h, icon, replace, button, toast, reducedMotion, isIOS } from "../ui.js";
+import { h, icon, replace, button, toast, reducedMotion, isIOS, sheet, closeSheet } from "../ui.js";
 
 const MAX_MS = 3 * 60 * 1000;
 const MIMES = ["video/mp4;codecs=avc1.640028,mp4a.40.2", "video/mp4;codecs=avc1,mp4a", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
@@ -28,7 +28,8 @@ export default {
       title = (t && t.title) || "Your words";
       lines = String((t && t.text) || "").split(/\n+/).map(s => s.trim()).filter(Boolean).map(text => ({ text }));
     } else {
-      row = store.idea(id);
+      // her copy on the phone (with edits not yet sent), else the briefing's own copy (Today's move), else the server's
+      row = store.ideaOrBriefing(id);
       if (!row) { try { const r = await api("GET", `/ideas/${encodeURIComponent(id)}`); row = r && r.idea; if (row) store.saveIdea(row); } catch { row = null; } }
       const s = row && ((row.current >= 0 && row.versions && row.versions[row.current] && row.versions[row.current].script) || row.script);
       title = (s && s.title) || (row && row.idea && row.idea.title) || "";
@@ -38,7 +39,8 @@ export default {
         if (s.cta && s.cta.say) lines.push({ cue: "Call to action", text: s.cta.say });
       } else if (row && row.idea && row.idea.hook) lines.push({ cue: "Hook", text: row.idea.hook });
     }
-    if (!lines.length) lines = [{ text: "Nothing to read yet. Write the script first, or paste your own words in the Studio." }];
+    if (!lines.length) lines = [{ text: row || id === "text" ? "Nothing to read yet. Write the script first, or paste your own words in the Studio."
+      : "Couldn't open this script just now. Check your connection and try again." }];
     const totalWords = lines.reduce((n, l) => n + words(l.text), 0) || 1;
 
     // ---------------------------------------------------------------- the screen
@@ -259,7 +261,8 @@ export default {
       const shareB = canShare ? button("Share", { kind: "ghost", icon: "share", onClick: () => keep("share") }) : null;
       const retake = button("Retake", { kind: "ghost", icon: "refresh", onClick: retakeIt });
       retake.setAttribute("data-act", "retake");
-      replace(takeBox, v, h("div", { class: "acts" },
+      const closeTake = topBtn("close", "Close the prompter", close, { "data-act": "close-take" });
+      replace(takeBox, h("div", { class: "take-top" }, closeTake), v, h("div", { class: "acts" },
         st.interrupted ? h("p", { class: "meta", text: "The take stopped when the phone was busy. What you recorded is kept." }) : null,
         h("p", { class: "meta", text: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")} · ${mb >= 1 ? mb.toFixed(1) + " MB" : Math.max(1, Math.round(mb * 1024)) + " KB"} · stays on your phone until you save it` }),
         saveB, h("div", { class: "btns" }, shareB, retake)));
@@ -282,6 +285,7 @@ export default {
           const a = h("a", { href: st.takeUrl, download: file.name, class: "offscreen" });
           document.body.append(a); a.click(); a.remove();
         }
+        st.take.kept = true;
         markFilmed();
       } catch (e) {
         if (e && e.name === "AbortError") return;           // she closed the share sheet
@@ -313,6 +317,21 @@ export default {
       if (st.recording) stopRecording();
       if (id === "text") go("/" + from); else go("/idea/" + id, { query: { from } });
     }
+    // leaving (the close button, a notification, a tab): a take she hasn't saved or shared is asked about first
+    function unsavedTake() { return !!(st.take && !st.take.kept) || st.recording; }
+    function canLeave() {
+      if (!unsavedTake()) return true;
+      if (st.recording) stopRecording();
+      return new Promise(resolve => {
+        let done = false;
+        const finish = v => { if (done) return; done = true; resolve(v); };
+        const keepB = button("Keep it", { kind: "lake", cls: "block", onClick: () => { finish(false); closeSheet(); } });
+        const goB = button("Discard this take", { kind: "ghost", cls: "block danger", icon: "trash", onClick: () => { finish(true); closeSheet(); } });
+        goB.setAttribute("data-act", "discard"); keepB.setAttribute("data-act", "keep");
+        sheet("Discard this take?", h("div", { class: "stack" },
+          h("p", { class: "muted", text: "It isn't saved yet. Save it to Photos first, or it's gone for good." }), keepB, goB), { onClose: () => finish(false) });
+      });
+    }
 
     // ---------------------------------------------------------------- start
     text.style.fontSize = prefs.size + "px";
@@ -331,7 +350,7 @@ export default {
         wpm: prefs.wpm, size: prefs.size, camErr: st.camErr, words: totalWords, mirrored: video.classList.contains("mirror") }),
     });
 
-    return () => {
+    return { canLeave, cleanup: () => {
       st.alive = false;
       cancelAnimationFrame(st.raf);
       document.removeEventListener("visibilitychange", onVisibility);
@@ -341,6 +360,6 @@ export default {
       if (st.wake) { try { st.wake.release(); } catch { /* */ } }
       if (st.takeUrl) URL.revokeObjectURL(st.takeUrl);
       if (window.__jarvis) delete window.__jarvis.prompter;
-    };
+    } };
   },
 };

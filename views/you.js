@@ -8,7 +8,7 @@ import { go } from "../router.js";
 import { BUILD, API, MOCK, SHORT_NAME } from "../config.js";
 import {
   h, icon, replace, button, iconButton, choice, setPressed, notice, sheet, closeSheet, toast, autogrow, isIOS, isIOSSafari, isStandalone,
-  PLATFORM_LABEL, APPEAR_LABEL,
+  PLATFORM_LABEL, APPEAR_LABEL, PROFILE_LIMITS, fieldSentence, profileField,
 } from "../ui.js";
 import { AREAS, HELPS, TONES, CTAS, LENGTHS } from "../shared/models.js";
 import * as push from "../push.js";
@@ -41,20 +41,31 @@ export default {
       if (st.saving) { st.saveTimer = setTimeout(save, 500); return; }
       st.saving = true;
       try {
-        const r = await api("PUT", "/me", { name: p.firstName.trim() || undefined, profile: p });
+        const L = PROFILE_LIMITS;
+        const send = { ...p, firstName: (p.firstName || "").slice(0, L.firstName), brokerage: (p.brokerage || "").slice(0, L.brokerage),
+          team: (p.team || "").slice(0, L.team), cta: (p.cta || "").slice(0, L.cta), voice: (p.voice || []).map(v => String(v).slice(0, L.voice)).slice(0, 5) };
+        const r = await api("PUT", "/me", { name: send.firstName.trim() || undefined, profile: send });
         if (r && r.user) store.setMe(r);
         st.error = null;
+        for (const el of root.querySelectorAll("[aria-invalid=true]")) el.removeAttribute("aria-invalid");
         if (els.save) els.save.textContent = "All changes saved";
       } catch (e) {
         st.error = e;
-        if (els.save) els.save.textContent = e.kind === "offline" ? "Not saved yet: you're offline" : (e.reason || "Not saved yet");
+        // offline or unreachable: the change stays on the phone, marked, and app.js sends it when the phone is back
+        if (["offline", "network", "busy"].includes(e.kind)) {
+          const cur = store.live.me || { user: {} };
+          store.setMe({ ...cur, user: { ...cur.user, name: (p.firstName || "").trim() || (cur.user && cur.user.name) || "", profile: { ...p } }, _dirtyProfile: true });
+        }
+        if (els.save) els.save.textContent = e.kind === "offline" ? "Not saved yet: you're offline. It saves when you're back." : e.kind === "bad_field" ? fieldSentence(e) : (e.reason || "Not saved yet");
+        const bad = e.kind === "bad_field" && root.querySelector("#f-" + profileField(e));
+        if (bad) bad.setAttribute("aria-invalid", "true");
       } finally { st.saving = false; }
     }
 
     // ---------------------------------------------------------------- pieces
     const text = (label, key, { hint = null, placeholder = "", required = false, onInput = null, max = 80 } = {}) => {
       const id = "f-" + key;
-      const inp = h("input", { class: "input", id, type: "text", value: p[key] || "", placeholder, maxLength: max, autocomplete: "off", required });
+      const inp = h("input", { class: "input", id, type: "text", value: p[key] || "", placeholder, maxLength: PROFILE_LIMITS[key] || max, autocomplete: "off", required });
       inp.addEventListener("input", () => { p[key] = inp.value; if (onInput) onInput(inp.value); changed(); });
       return h("div", { class: "field" }, h("label", { htmlFor: id, text: label }), inp, hint ? h("p", { class: "hint", text: hint }) : null);
     };
@@ -94,7 +105,7 @@ export default {
 
     function cta() {
       const custom = !CTAS.includes(p.cta);
-      const inp = h("input", { class: "input", type: "text", value: custom ? p.cta : "", placeholder: "Or your own, e.g. “Text me ‘TOUR’”", maxLength: 60, "aria-label": "Your own call to action" });
+      const inp = h("input", { class: "input", type: "text", value: custom ? p.cta : "", placeholder: "Or your own, e.g. “Text me ‘TOUR’”", maxLength: PROFILE_LIMITS.cta, "aria-label": "Your own call to action" });
       const row = h("div", { class: "choices", role: "group", "aria-label": "Your call to action" });
       const btns = CTAS.map(v => choice(v.charAt(0).toUpperCase() + v.slice(1), p.cta === v, () => { p.cta = v; inp.value = ""; btns.forEach((x, i) => setPressed(x, CTAS[i] === v)); changed(); }));
       row.append(...btns);
@@ -117,7 +128,7 @@ export default {
       const v = (p.voice || []).slice(0, 3);
       while (v.length < 3) v.push("");
       v.forEach((txt, i) => {
-        const ta = h("textarea", { class: "textarea", rows: 3, value: txt, placeholder: i === 0 ? "Paste a caption you wrote" : "Another one (optional)", "aria-label": `Caption ${i + 1}` });
+        const ta = h("textarea", { class: "textarea", rows: 3, value: txt, maxLength: PROFILE_LIMITS.voice, placeholder: i === 0 ? "Paste a caption you wrote" : "Another one (optional)", "aria-label": `Caption ${i + 1}` });
         autogrow(ta);
         ta.addEventListener("input", () => { v[i] = ta.value; p.voice = v.map(s => s.trim()).filter(Boolean); changed(); });
         box.append(ta);
@@ -198,6 +209,7 @@ export default {
         button("Sign out", { kind: "primary", cls: "block", onClick: async () => {
           closeSheet();
           try { if (push.state().on) await push.disable(); } catch { /* */ }
+          try { await api("DELETE", "/me/device", undefined, { timeout: 8000 }); } catch { /* best effort: the slot frees when Isaac revokes it */ }
           await store.signOutHere();
           sessionStorage.setItem("jarvis:signedOut", "self");
           go("/code", { replace: true });

@@ -5,7 +5,7 @@ import * as store from "../store.js";
 import { api } from "../api.js";
 import { go } from "../router.js";
 import { SHORT_NAME } from "../config.js";
-import { h, icon, replace, button, choice, setPressed, notice, toast, autogrow, isIOS, isStandalone, PLATFORM_LABEL } from "../ui.js";
+import { h, icon, replace, button, choice, setPressed, notice, toast, autogrow, isIOS, isStandalone, PLATFORM_LABEL, PROFILE_LIMITS, fieldSentence, profileField } from "../ui.js";
 import { AREAS, HELPS, TONES, CTAS } from "../shared/models.js";
 import { CAMERA_CHOICES } from "./you.js";
 import * as push from "../push.js";
@@ -45,7 +45,7 @@ export default {
     }
     const field = (label, inp, hint) => h("div", { class: "field" }, h("label", { htmlFor: inp.id, text: label }), inp, hint ? h("p", { class: "hint", text: hint }) : null);
     const input = (id, key, placeholder, onInput) => {
-      const i = h("input", { class: "input", id, type: "text", value: p[key] || "", placeholder, maxLength: 80, autocomplete: id === "s-name" ? "given-name" : "organization" });
+      const i = h("input", { class: "input", id, type: "text", value: p[key] || "", placeholder, maxLength: PROFILE_LIMITS[key] || 80, autocomplete: id === "s-name" ? "given-name" : "organization" });
       i.addEventListener("input", () => { p[key] = i.value; keep(); if (onInput) onInput(i.value); });
       return i;
     };
@@ -93,7 +93,7 @@ export default {
       const v = (p.voice || []).slice(0, 2);
       while (v.length < 2) v.push("");
       v.forEach((txt, i) => {
-        const ta = h("textarea", { class: "textarea", rows: 3, value: txt, placeholder: i === 0 ? "Paste a caption you've written" : "And another (optional)", "aria-label": `Caption ${i + 1}` });
+        const ta = h("textarea", { class: "textarea", rows: 3, value: txt, maxLength: PROFILE_LIMITS.voice, placeholder: i === 0 ? "Paste a caption you've written" : "And another (optional)", "aria-label": `Caption ${i + 1}` });
         autogrow(ta);
         ta.addEventListener("input", () => { v[i] = ta.value; p.voice = v.map(s => s.trim()).filter(Boolean); keep(); });
         caps.append(ta);
@@ -136,7 +136,9 @@ export default {
       if (busy) return;
       busy = true;
       keep();
-      const prof = { ...p, firstName: (p.firstName || "").trim(), brokerage: (p.brokerage || "").trim(), team: (p.team || "").trim() };
+      const L = PROFILE_LIMITS;
+      const prof = { ...p, firstName: (p.firstName || "").trim().slice(0, L.firstName), brokerage: (p.brokerage || "").trim().slice(0, L.brokerage),
+        team: (p.team || "").trim().slice(0, L.team), cta: (p.cta || "DM me").slice(0, L.cta), voice: (p.voice || []).map(v => String(v).slice(0, L.voice)).slice(0, 5) };
       const status = h("div", { class: "part" }, h("p", { class: "writing-line" }, h("span", { class: "dots", "aria-hidden": "true" }, h("i"), h("i"), h("i")), "Saving your answers…"));
       root.append(status);
       try {
@@ -147,6 +149,14 @@ export default {
         go("/today", { query: { first: "1" }, replace: true });
       } catch (e) {
         busy = false;
+        if (e.kind === "bad_field") {
+          // a field the Worker refused: name it, and take her to its question
+          const STEP = { firstName: 1, name: 1, brokerage: 1, team: 1, areas: 2, helps: 2, camera: 3, platforms: 3, tone: 4, voice: 4, cta: 4, notifyTime: 5 };
+          const n2 = STEP[profileField(e)] || 1;
+          replace(status, notice(fieldSentence(e), { kind: "warn", icon: "info",
+            action: button(`Go to question ${n2}`, { kind: "lake", onClick: () => go("/setup/" + n2, { replace: true }) }) }));
+          return;
+        }
         replace(status, notice(e.reason || "Couldn't save that. Try again.", { kind: "error", icon: "info",
           action: button("Try again", { kind: "lake", icon: "refresh", onClick: () => { status.remove(); finish(); } }) }));
       }

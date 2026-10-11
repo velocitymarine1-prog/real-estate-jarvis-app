@@ -15,16 +15,19 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 export default {
   async mount(root, route) {
-    const st = { answer: store.latestBriefing(), loading: false, others: false, sig: "" };
-    const today = easternDate();
+    const st = { answer: store.latestBriefing(), loading: false, others: false, sig: "", loadedOnce: false, failed: null };
+    let today = easternDate();                     // recomputed on every draw: an app left open overnight turns the page
     let alive = true;
+    // a briefing is today's only if it's dated today, whatever the cached answer said when it loaded
+    const stale = a => !!(a && a.briefing && (a.stale || a.briefing.date !== today));
 
     function draw() {
       if (!alive) return;
+      today = easternDate();
       const a = st.answer, b = a && a.briefing;
       const fm = firstMove();
       replace(root,
-        header(b && !a.stale ? b : null),
+        header(b && !stale(a) ? b : null),
         b && b.alert ? alertBanner(b.alert) : null,
         stateNote(a, fm),
         moveCard(b, fm),
@@ -78,10 +81,15 @@ export default {
         return h("div", { class: "state-note" }, notice(fm && fm.state === "done" ? "Your first full briefing arrives tomorrow morning by 7:00. Until then, here's a first move made for you."
           : "Your first full briefing arrives tomorrow morning by 7:00.", { icon: "sun", kind: "calm" }));
       }
-      if (a.stale) {
+      if (stale(a)) {
+        const whose = `This is ${b.date ? weekdayLong(b.date) : "an earlier"}'s briefing.`;
+        if (!st.loadedOnce && !st.failed) return null;           // the fresh one is still on its way in: no note for a moment's gap
+        if (st.failed && (st.failed === "offline" || st.failed === "network")) {
+          return h("div", { class: "state-note" }, notice(whose, { icon: "offline", kind: "calm",
+            sub: st.failed === "offline" ? "Today's loads when you're back online." : "Today's loads when Jarvis can be reached." }));
+        }
         const p = easternParts();
         const early = p.hh * 60 + p.mm < 7 * 60 + 30;
-        const whose = `This is ${b.date ? weekdayLong(b.date) : "an earlier"}'s briefing.`;
         return h("div", { class: "state-note" }, early
           ? notice("Today's briefing is on its way.", { icon: "sun", kind: "calm", sub: whose })
           : notice("Today's briefing didn't come through. Isaac has been told.", { icon: "info", kind: "warn", sub: whose }));
@@ -385,12 +393,17 @@ export default {
         store.saveBriefing(ans);
         st.answer = store.latestBriefing() || { briefing: ans.briefing, stale: ans.stale, date: ans.date };
         if (ans && !ans.briefing) st.answer = { briefing: null, stale: false, date: ans.date, fetchedAt: Date.now() };
+        st.failed = null;
         if (manual) toast("Up to date");
       } catch (e) {
+        st.failed = e.kind;
         if (manual && e.kind !== "aborted") toast(e.kind === "offline" ? "You're offline. Showing what loaded earlier." : e.reason);
       } finally {
         st.loading = false;
-        const a = st.answer, sig = a ? JSON.stringify([a.date, a.stale, a.briefing && a.briefing.createdAt, a.briefing && a.briefing.date]) : "";
+        const first = !st.loadedOnce;
+        st.loadedOnce = true;
+        const a = st.answer, sig = a ? JSON.stringify([a.date, a.stale, a.briefing && a.briefing.createdAt, a.briefing && a.briefing.date, easternDate(), st.failed]) : "";
+        if (first) st.sig = "";
         if (manual || sig !== st.sig || !a) { st.sig = sig; draw(); }
       }
     }
@@ -420,7 +433,7 @@ export default {
     }
 
     draw();
-    const offs = [store.on("front", () => load()), store.on("online", draw)];
+    const offs = [store.on("front", () => { draw(); load(); }), store.on("online", on => { draw(); if (on) load(); })];
     load();
     if (route.query.first === "1") { history.replaceState(history.state, "", "#/today"); startFirstMove(); }
     return () => { alive = false; offs.forEach(f => f()); };

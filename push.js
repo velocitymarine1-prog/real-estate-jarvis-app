@@ -58,3 +58,19 @@ export async function setTime(time) {
   const sub = await reg.pushManager.getSubscription();
   if (sub) await api("POST", "/push", { subscription: sub.toJSON(), time });
 }
+
+// refresh(): while the heads-up is on, post the subscription again (once a day, from app.js at launch). A push service can drop a
+// subscription quietly; if it's gone, a new one is made (permission is already granted, so no prompt); if permission was taken back
+// in Settings, the switch goes off so You doesn't say On for a heads-up that can't come
+export async function refresh() {
+  const s = state();
+  if (!s.on) return;
+  if (MOCK) { await api("POST", "/push", { subscription: { endpoint: "https://push.example/mock", keys: { p256dh: "mock", auth: "mock" } }, time: s.time }); return; }
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) return;
+  if (Notification.permission !== "granted") { store.set("push", { ...s, on: false }); return; }
+  const reg = await ready();
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(VAPID_PUBLIC) });
+  await api("POST", "/push", { subscription: sub.toJSON(), time: s.time });
+  store.set("push", { ...s, endpoint: sub.endpoint });
+}

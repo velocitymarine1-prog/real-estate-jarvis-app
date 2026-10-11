@@ -1,9 +1,11 @@
 // compliance.js (browser-safe): the check before posting (design §3.13).
 //
 // It reads what she says, what's on screen, the caption and the hashtags, and returns findings:
-//   { rule, severity: "amber"|"note", text, why, match?, fix: null | { label, kind, find?, replace?, text?, tweak?, note?, before? } }
-// [] means "Ready to post". The word lists live in data/fair-housing.json, passed in as ctx.rules (the browser fetches
-// it; Node and the Worker import or read it), so this module never loads JSON itself.
+//   { rule, severity: "amber"|"note", text, why, match?,
+//     fix: null | { label, kind: "replace"|"append"|"remove"|"tweak", find?, replace?, text?, tweak?, note?, before?, at? } }
+// fix.at lists where the check matched ({ path, n }: the n-th occurrence of `find` in that field; { tag } for a hashtag),
+// so a one-tap fix changes only those places. [] means "Ready to post". The word lists live in data/fair-housing.json,
+// passed in as ctx.rules (the browser fetches it; Node and the Worker import or read it), so this module never loads JSON.
 
 import { extractNumbers, suppliedFrom, unknownNumbers, numberMatches } from "./numbers.js";
 import { normWords } from "./text.js";
@@ -13,6 +15,12 @@ const SEVERITY = { amber: 0, note: 1 };
 const PHRASE_RULES = ["fh.people", "fh.protected", "fh.safe", "fh.schools", "fh.places", "fh.primary", "promise", "regz", "politics"];
 const SCHOOL_NAME = /\b(?:[A-Z][\w'’.-]*\s+){1,4}(?:Elementary|Middle|High|Academy|Prep|K-8)\b/;
 const HEDGE = /\b(?:no|not|never|nothing|nobody|no one|without|if|whether|can['’]?t|cannot|isn['’]t|aren['’]t|won['’]t|don['’]t|doesn['’]t|nor|neither)\b/i;
+// A fact's range ("12-month range $389,963 to $400,000", "a 52-week high of 7.9%"): its numbers are incidental.
+const RANGE_ZONE = /\b(?:\d+-(?:week|month|year)\s+)?(?:range|high|low)\b[^;()]*/gi;
+// …and a script cites one of them only when it talks about a high, a low or a range.
+const RANGE_WORDS = /\b(?:high|low|highest|lowest|peak|record|range|top|bottom|most|least)\b/i;
+// Sentences: a period between digits ("6.85%") or after an initial or a common abbreviation doesn't end one.
+const SENTENCE = /(?:[^.!?\n]|(?<=\d)\.(?=\d)|(?<=\b[A-Z])\.(?=\s)|(?<=\b(?:St|Dr|Ave|Blvd|Rd|Mr|Mrs|Ms|Jr|Sr|vs|No|Mt|Ft|etc|approx))\.(?=\s))+(?:[.!?]+["”’)]*|$)[ \t]*/g;
 
 // ---------------------------------------------------------------------------------------------------------------
 // The rules data, compiled once per object (the Worker keeps its copy for the isolate's life).
@@ -28,7 +36,7 @@ function regex(src, caseSensitive) {
 }
 
 function compilePattern(p) {
-  if (typeof p === "string") return { re: regex(escapeRe(p).replace(/\\? /g, "[\\s-]+"), false), raw: { phrase: p } };
+  if (typeof p === "string") return { re: regex(escapeRe(p).replace(/\\? /g, "[\\s-]+"), false), raw: { phrase: p }, replaceIf: [] };
   if (!p || typeof p !== "object" || typeof p.re !== "string") return null;
   const re = regex(p.re, p.case === true);
   if (!re) return null;
@@ -103,10 +111,22 @@ function hashtagWords(h) {
     .replace(/([A-Za-z])(\d)/g, "$1 $2").replace(/(\d)([A-Za-z])/g, "$1 $2").replace(/_/g, " ");
 }
 
+/** "Perfect For you" → "#PerfectForYou"; "" → null. */
+function toHashtag(words) {
+  const body = String(words ?? "").split(/[^\p{L}\p{N}]+/u).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join("");
+  return body ? `#${body}` : null;
+}
+
+// Does text[i] end a sentence? Not the point in "6.85".
+function endsSentence(text, i) {
+  if (!/[.!?\n]/.test(text[i])) return false;
+  return !(text[i] === "." && /\d/.test(text[i - 1] ?? "") && /\d/.test(text[i + 1] ?? ""));
+}
+
 function sentenceAround(text, start, end) {
   let a = start, b = end;
-  while (a > 0 && !/[.!?\n]/.test(text[a - 1])) a--;
-  while (b < text.length && !/[.!?\n]/.test(text[b])) b++;
+  while (a > 0 && !endsSentence(text, a - 1)) a--;
+  while (b < text.length && !endsSentence(text, b)) b++;
   return text.slice(a, b);
 }
 
@@ -118,17 +138,25 @@ function hedgedBefore(text, start) {
 
 const compact = (s) => String(s ?? "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
 
+function findRe(find) {
+  const f = String(find).trim();
+  const body = escapeRe(f).replace(/\s+/g, "\\s+");
+  const pre = /^\w/.test(f) ? "\\b" : "";
+  const post = /\w$/.test(f) ? "\\b" : "";
+  return new RegExp(pre + body + post, "gi");
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // What gets checked
 
 /** Every spoken, on-screen, caption and hashtag string of a script, joined (one per line). */
 export function scriptText(script) {
-  return fields(script, { hashtagsRaw: true }).map((f) => f.text).join("\n");
+  return fields(script).map((f) => (f.kind === "hashtag" ? f.raw : f.text)).join("\n");
 }
 
-function fields(script, { hashtagsRaw = false } = {}) {
+function fields(script) {
   const out = [];
-  const push = (path, text, kind) => { if (typeof text === "string" && text.trim()) out.push({ path, text, kind }); };
+  const push = (path, text, kind, raw) => { if (typeof text === "string" && text.trim()) out.push({ path, text, kind, raw: raw ?? text }); };
   const s = script && typeof script === "object" ? script : {};
   push("hook.say", s.hook?.say, "say");
   push("hook.onScreen", s.hook?.onScreen, "onScreen");
@@ -139,8 +167,21 @@ function fields(script, { hashtagsRaw = false } = {}) {
   push("cta.say", s.cta?.say, "say");
   push("cta.onScreen", s.cta?.onScreen, "onScreen");
   push("caption", s.caption, "caption");
-  (Array.isArray(s.hashtags) ? s.hashtags : []).forEach((h, i) => push(`hashtags.${i}`, hashtagsRaw ? h : hashtagWords(h), "hashtag"));
+  (Array.isArray(s.hashtags) ? s.hashtags : []).forEach((h, i) => { if (typeof h === "string") push(`hashtags.${i}`, hashtagWords(h), "hashtag", h); });
   return out;
+}
+
+// Where a match is, for the fix: the n-th occurrence of its words in that field, or the hashtag itself.
+function occurrence(f, index, text) {
+  if (f.kind === "hashtag") return { tag: f.raw };
+  const n = [...f.text.matchAll(findRe(text))].findIndex((x) => x.index === index);
+  return n >= 0 ? { path: f.path, n } : { path: f.path };
+}
+
+function addAt(fix, at) {
+  if (!fix || fix.kind === "tweak" || fix.kind === "append") return;
+  fix.at = fix.at || [];
+  if (!fix.at.some((a) => a.tag === at.tag && a.path === at.path && a.n === at.n)) fix.at.push(at);
 }
 
 // A conservative guess at Spanish, for when the caller doesn't say (a script after the "In Spanish" tweak).
@@ -220,7 +261,9 @@ function checkPhrases(rule, flds, all, ctx) {
         }
         taken.push([fi, start, end]);
         const key = m[0].toLowerCase().replace(/\s+/g, " ");
-        if (!found.has(key)) found.set(key, phraseFinding(rule, p, m, all));
+        let finding = found.get(key);
+        if (!finding) { finding = phraseFinding(rule, p, m, all); found.set(key, finding); }
+        addAt(finding.fix, occurrence(f, start, m[0]));
       }
     });
   }
@@ -264,39 +307,56 @@ function captionSourceLines(caption) {
   return String(caption ?? "").split("\n").map((l) => l.trim()).filter((l) => /^(?:sources?\b|based on information from\b)/i.test(l));
 }
 
-function checkNumbers(rules, flds, ctx, script) {
+/** A fact's quantities with their units; those inside its range ("12-month range … to …") are marked incidental. */
+function factNumbers(fact) {
+  const text = String(fact.text ?? "");
+  const zones = [...text.matchAll(RANGE_ZONE)].map((m) => [m.index, m.index + m[0].length]);
+  return extractNumbers(text).filter((n) => n.kind === "num").map((n) => ({ ...n, incidental: zones.some(([a, b]) => n.index >= a && n.index < b) }));
+}
+
+// The same number in the same unit, at the coarser of the two roundings ("$390,225" cites "$390K").
+const sameNumber = (n, fn) => n.unit === fn.unit && (numberMatches(n, fn.value) || numberMatches(fn, n.value));
+
+function checkNumbers(rules, allFields, ctx, script, lang) {
   const out = [];
+  const flds = allFields.filter((f) => f.kind !== "hashtag"); // a hashtag is a label, not a claim: #Top20, #LakeMary2026
   const text = flds.map((f) => f.text).join("\n");
   const facts = Array.isArray(ctx.facts) ? ctx.facts.filter((f) => f && typeof f === "object") : [];
   const supplied = suppliedFrom(ctx.supplied ?? [], facts);
   const unsourced = rules["num.unsourced"] || {};
-  for (const n of unknownNumbers(text, supplied, { userText: ctx.userText ?? "" })) {
-    out.push({
-      rule: "num.unsourced", severity: unsourced.severity || "amber", text: fill(unsourced.text || "Check this number: {match}", { match: n.raw }),
-      why: unsourced.why || "", match: n.raw, fix: { label: unsourced.fixLabel || "Take out the sentence", kind: "remove", find: n.raw },
-    });
+  for (const n of unknownNumbers(text, supplied, { userText: ctx.userText ?? "", lang })) {
+    const fix = { label: unsourced.fixLabel || "Take out the sentence", kind: "remove", find: n.raw };
+    for (const f of flds) {
+      [...f.text.matchAll(findRe(n.raw))].forEach((x) => addAt(fix, occurrence(f, x.index, n.raw)));
+    }
+    out.push({ rule: "num.unsourced", severity: unsourced.severity || "amber", text: fill(unsourced.text || "Check this number: {match}", { match: n.raw }), why: unsourced.why || "", match: n.raw, fix });
   }
 
-  // A supplied statistic from a sourced fact needs its "Source:" line in the caption.
-  const sourced = facts.filter((f) => typeof f.source === "string" && f.source.trim()).map((f) => ({ source: f.source.trim(), values: suppliedFrom(f) }));
-  if (sourced.length) {
-    const cited = [];
-    for (const n of extractNumbers(text)) {
-      if (n.kind !== "num") continue;
-      for (const f of sourced) {
-        if (f.values.some((v) => numberMatches(n, v)) && !cited.includes(f.source)) cited.push(f.source);
+  // A supplied statistic from a sourced fact needs its "Source:" line in the caption: the same number in the same
+  // unit; a range's high or low only when the sentence talks about one; never a number she gave herself.
+  const sourced = facts.filter((f) => typeof f.source === "string" && f.source.trim()).map((f) => ({ source: f.source.trim(), nums: factNumbers(f) }));
+  if (!sourced.length) return out;
+  const hers = suppliedFrom(ctx.userText ?? "");
+  const cited = [];
+  for (const f of flds) {
+    for (const n of extractNumbers(f.text, { lang })) {
+      if (n.kind !== "num" || hers.some((v) => numberMatches(n, v))) continue;
+      const sentence = sentenceAround(f.text, n.index, n.index + n.raw.length);
+      for (const s of sourced) {
+        if (cited.includes(s.source)) continue;
+        if (s.nums.some((fn) => sameNumber(n, fn) && (!fn.incidental || RANGE_WORDS.test(sentence)))) cited.push(s.source);
       }
     }
-    if (cited.length) {
-      const lines = captionSourceLines(script?.caption).join(" ").toLowerCase();
-      const missing = cited.filter((src) => !lines.includes(src.split(",")[0].trim().toLowerCase()));
-      if (missing.length) {
-        const rule = rules["num.source"] || {};
-        const line = `Source: ${missing.join("; ")}`;
-        const fix = { label: rule.fixLabel || "Add the source line", kind: "append", text: line };
-        if (String(ctx.brokerage ?? "").trim()) fix.before = String(ctx.brokerage).trim();
-        out.push({ rule: "num.source", severity: rule.severity || "amber", text: fill(rule.text || "Add the source line: \"{line}\"", { line }), why: rule.why || "", match: line, fix });
-      }
+  }
+  if (cited.length) {
+    const lines = captionSourceLines(script?.caption).join(" ").toLowerCase();
+    const missing = cited.filter((src) => !lines.includes(src.split(",")[0].trim().toLowerCase()));
+    if (missing.length) {
+      const rule = rules["num.source"] || {};
+      const line = `Source: ${missing.join("; ")}`;
+      const fix = { label: rule.fixLabel || "Add the source line", kind: "append", text: line };
+      if (String(ctx.brokerage ?? "").trim()) fix.before = String(ctx.brokerage).trim();
+      out.push({ rule: "num.source", severity: rule.severity || "amber", text: fill(rule.text || "Add the source line: \"{line}\"", { line }), why: rule.why || "", match: line, fix });
     }
   }
   return out;
@@ -331,7 +391,7 @@ function checkMusic(rule, script) {
   if (!suggestion) return null;
   if (test(rule.safeRe, suggestion)) return null;
   if (!rule.namedC.some((p) => test(p.re, suggestion))) return null;
-  const fix = rule.replace ? { label: rule.fixLabel || "Use original audio", kind: "replace", find: suggestion, replace: rule.replace } : null;
+  const fix = rule.replace ? { label: rule.fixLabel || "Use original audio", kind: "replace", find: suggestion, replace: rule.replace, at: [{ path: "audio.suggestion", n: 0 }] } : null;
   return { rule: "music", severity: rule.severity || "note", text: fill(rule.text || "Check the music: '{match}'", { match: suggestion }), why: rule.why || "", match: suggestion, fix };
 }
 
@@ -350,7 +410,7 @@ export function checkScript(script, ctx = {}) {
   }
   const b = checkBrokerage(rules["fl.brokerage"] || {}, script, ctx.brokerage);
   if (b) out.push(b);
-  out.push(...checkNumbers(rules, flds, ctx, script));
+  out.push(...checkNumbers(rules, flds, ctx, script, lang));
   if (String(ctx.remixCaption ?? "").trim()) {
     const c = checkCopy(rules.copy || {}, flds, ctx.remixCaption);
     if (c) out.push(c);
@@ -389,34 +449,31 @@ export function checkTeamName(team, brokerage, rules) {
 // ---------------------------------------------------------------------------------------------------------------
 // One-tap fixes
 
-const EDITABLE = (s) => {
+// The fields the check reads (and so the only ones a fix touches), by path.
+const CHECKED = (s) => {
   const out = [];
-  const add = (obj, key) => { if (obj && typeof obj[key] === "string") out.push([obj, key]); };
-  add(s, "title");
-  if (s.hook) { add(s.hook, "say"); add(s.hook, "onScreen"); add(s.hook, "shot"); }
-  for (const b of Array.isArray(s.beats) ? s.beats : []) { add(b, "say"); add(b, "onScreen"); add(b, "shot"); }
-  if (s.cta) { add(s.cta, "say"); add(s.cta, "onScreen"); }
-  add(s, "caption");
-  if (s.audio) { add(s.audio, "suggestion"); add(s.audio, "note"); }
-  if (Array.isArray(s.shotList)) s.shotList.forEach((x, i) => { if (typeof x === "string") out.push([s.shotList, i]); });
+  const add = (path, obj, key) => { if (obj && typeof obj[key] === "string") out.push({ path, obj, key }); };
+  add("hook.say", s.hook, "say");
+  add("hook.onScreen", s.hook, "onScreen");
+  (Array.isArray(s.beats) ? s.beats : []).forEach((b, i) => { add(`beats.${i}.say`, b, "say"); add(`beats.${i}.onScreen`, b, "onScreen"); });
+  add("cta.say", s.cta, "say");
+  add("cta.onScreen", s.cta, "onScreen");
+  add("caption", s, "caption");
+  add("audio.suggestion", s.audio, "suggestion");
   return out;
 };
-
-function findRe(find) {
-  const body = escapeRe(String(find).trim()).replace(/\s+/g, "\\s+");
-  const pre = /^\w/.test(find.trim()) ? "\\b" : "";
-  const post = /\w$/.test(find.trim()) ? "\\b" : "";
-  return new RegExp(pre + body + post, "gi");
-}
 
 function tidy(s) {
   return s.replace(/[ \t]{2,}/g, " ").replace(/ +([,.;:!?])/g, "$1").replace(/^[ \t]+|[ \t]+$/gm, "").replace(/([(“"]) +/g, "$1");
 }
 
-function replaceIn(text, find, replace) {
+// Replace the selected occurrences of `find` (all when `only` is null), keeping each one's case and the article before it.
+function replaceIn(text, find, replace, only = null) {
   const re = findRe(find);
-  let out = "", last = 0, changed = false;
+  let out = "", last = 0, changed = false, i = -1;
   for (const m of text.matchAll(re)) {
+    i++;
+    if (only && !only.has(i)) continue;
     let head = out + text.slice(last, m.index);
     const repl = matchCase(m[0], replace);
     // "an exclusive neighborhood" → "a neighborhood": fix the article right before the change.
@@ -431,54 +488,67 @@ function replaceIn(text, find, replace) {
     changed = true;
   }
   if (!changed) return text;
-  return tidy(out + text.slice(last));
+  const result = tidy(out + text.slice(last));
+  return /^[a-z]/.test(result) && /^[A-Z]/.test(text) ? result[0].toUpperCase() + result.slice(1) : result;
 }
 
-function removeSentencesIn(text, find) {
-  const re = findRe(find);
-  if (!test(re, text)) return text;
-  const lines = text.split("\n").map((line) => {
-    if (!test(re, line)) return line;
-    const sentences = line.match(/[^.!?]+(?:[.!?]+["”’)]*|$)\s*/g) || [line];
-    const kept = sentences.filter((s) => !test(re, s));
-    return kept.join("").trim() || null;
-  });
-  return lines.filter((l) => l !== null).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+// Take out the sentences holding the selected occurrences of `find` (all when `only` is null).
+function removeSentencesIn(text, find, only = null) {
+  const at = [...text.matchAll(findRe(find))].filter((m, i) => !only || only.has(i)).map((m) => m.index);
+  if (!at.length) return text;
+  const out = [];
+  let offset = 0;
+  for (const line of text.split("\n")) {
+    const segs = [...line.matchAll(SENTENCE)].filter((m) => m[0]).map((m) => [offset + m.index, offset + m.index + m[0].length, m[0]]);
+    const kept = segs.filter(([a, b]) => !at.some((p) => p >= a && p < b));
+    if (kept.length === segs.length) out.push(line);
+    else {
+      const l = kept.map((x) => x[2]).join("").trim();
+      if (l) out.push(l);
+    }
+    offset += line.length + 1;
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** Apply a finding's one-tap fix: a new Script (the input is never changed). A "tweak" fix (a rewrite the app asks
- *  the server for) and a finding without a fix return an unchanged copy. */
+/** Apply a finding's one-tap fix: a new Script (the input is never changed). A replace or remove fix changes only
+ *  where the check matched (fix.at); without fix.at, every occurrence in the fields the check reads. A "tweak" fix
+ *  (a rewrite the app asks the server for) and a finding without a fix return an unchanged copy. */
 export function applyFix(script, finding) {
   const s = structuredClone(script);
   const fix = finding?.fix;
   if (!fix || typeof fix !== "object") return s;
-  if (fix.kind === "replace" && typeof fix.find === "string" && fix.find.trim()) {
-    const replace = String(fix.replace ?? "");
-    for (const [obj, key] of EDITABLE(s)) obj[key] = replaceIn(obj[key], fix.find, replace);
+
+  if ((fix.kind === "replace" || fix.kind === "remove") && typeof fix.find === "string" && fix.find.trim()) {
+    const at = Array.isArray(fix.at) ? fix.at : null;
+    const byPath = new Map(); // path → Set of occurrences, or null for every one
+    const tags = new Set();
+    if (at) {
+      for (const a of at) {
+        if (a && typeof a.tag === "string") { tags.add(a.tag); continue; }
+        if (!a || typeof a.path !== "string") continue;
+        if (!Number.isInteger(a.n)) byPath.set(a.path, null);
+        else if (byPath.get(a.path) !== null) byPath.set(a.path, (byPath.get(a.path) || new Set()).add(a.n));
+      }
+    }
+    for (const { path, obj, key } of CHECKED(s)) {
+      if (at && !byPath.has(path)) continue;
+      if (!at && path === "audio.suggestion" && obj[key].trim() !== fix.find.trim()) continue;
+      const only = at ? byPath.get(path) : null;
+      obj[key] = fix.kind === "replace" ? replaceIn(obj[key], fix.find, String(fix.replace ?? ""), only) : removeSentencesIn(obj[key], fix.find, only);
+    }
     if (Array.isArray(s.hashtags)) {
-      const want = compact(fix.find);
-      const camel = replace.split(/\s+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join("");
+      const re = findRe(fix.find);
+      const hit = (h) => (at ? tags.has(h) : test(re, hashtagWords(h)));
       s.hashtags = s.hashtags.map((h) => {
-        const body = String(h).replace(/^#+/, "");
-        const at = body.toLowerCase().indexOf(want);
-        if (!want || at < 0) return h;
-        const next = body.slice(0, at) + camel + body.slice(at + want.length);
-        return next ? `#${next}` : null;
+        if (typeof h !== "string" || !hit(h)) return h;
+        if (fix.kind === "remove") return null;
+        return toHashtag(replaceIn(hashtagWords(h), fix.find, String(fix.replace ?? "")));
       }).filter(Boolean);
     }
     return s;
   }
-  if (fix.kind === "remove" && typeof fix.find === "string" && fix.find.trim()) {
-    for (const [obj, key] of EDITABLE(s)) {
-      if (key === "title" || key === "suggestion" || key === "note") continue;
-      obj[key] = removeSentencesIn(obj[key], fix.find);
-    }
-    if (Array.isArray(s.hashtags)) {
-      const want = compact(fix.find);
-      s.hashtags = s.hashtags.filter((h) => !want || !compact(h).includes(want));
-    }
-    return s;
-  }
+
   if (fix.kind === "append" && typeof fix.text === "string" && fix.text.trim()) {
     const text = fix.text.trim();
     const cap = String(s.caption ?? "").replace(/\s+$/, "");

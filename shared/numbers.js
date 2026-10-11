@@ -13,6 +13,8 @@
 // ("30 November") or an ordinal ("30th year") never vouches for an invented "30%".
 
 const MONTHS = "Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sept?(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?";
+// Spanish month names, for a script after the "In Spanish" tweak ("8 de octubre").
+const MESES = "enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre";
 const STREETS = "Blvd|Boulevard|Rd|Road|Ave|Avenue|St|Street|Dr|Drive|Ln|Lane|Ct|Court|Way|Pkwy|Parkway|Hwy|Highway|Cir|Circle|Pl|Place|Trl|Trail|Ter|Terrace|Loop|Cv|Cove|Xing|Crossing|Sq|Square";
 // Words that turn the number after them into a name, not a quantity (case-sensitive on purpose).
 const ID_WORDS = "SR|CR|US|Interstate|Route|Rte\\.?|Hwy|Highway|[Ee]xits?|HB|SB|CS/HB|Amendments?|Article|Section|§|s\\.|ss\\.|Rule|Chapter|Ch\\.|Unit|Apt\\.?|Suite|Ste\\.?|Lot|Phase|Building|Bldg\\.?|District|ZIP|Zip|zip code|ZIP code|No\\.|Channel|News|Fox|WESH|WFTV|WKMG|Station|Gate|Pier|Terminal|Concourse|Series";
@@ -28,16 +30,22 @@ const MASKS = [
   ["date", /(?<![\d/.,])(?:1[0-2]|0?[1-9])\/(?:3[01]|[12]\d|0?[1-9])(?:\/(?:\d{4}|\d{2}))?(?![\d/%])/g],
   ["date", new RegExp(`\\b(?:${MONTHS})\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?(?:\\s?[–-]\\s?\\d{1,2}(?:st|nd|rd|th)?)?(?!\\d|\\s?%)`, "g")],
   ["date", new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?(?:\\s?[–-]\\s?\\d{1,2}(?:st|nd|rd|th)?)?\\s+(?:of\\s+)?(?:${MONTHS})\\b`, "g")],
+  ["date", new RegExp(`\\b\\d{1,2}(?:\\s?[–-]\\s?\\d{1,2})?\\s+de\\s+(?:${MESES})`, "gi")],
+  ["date", new RegExp(`\\b(?:${MESES})\\s+\\d{1,2}\\b(?![\\d.,])`, "gi")],
   ["time", /\b\d{1,2}(?::\d{2})?\s?[–-]\s?\d{1,2}(?::\d{2})?\s?[ap]\.?m\.?(?![a-z])/gi],
   ["time", /\b\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]\.?m\.?(?![a-z]))?(?!\d)/gi],
   ["time", /\b\d{1,2}\s?[ap]\.?m\.?(?![a-z])/gi],
-  ["seconds", /\b\d+(?:\.\d+)?(?:\s?[–-]\s?\d+(?:\.\d+)?)?\s?-?\s?(?:s|secs?|seconds?)\b/gi],
+  ["seconds", /\b\d+(?:\.\d+)?(?:\s?[–-]\s?\d+(?:\.\d+)?)?\s?-?\s?(?:s|secs?|seconds?|segundos?|seg)\b/gi],
   ["term", /\b(?:10|15|20|25|30|40|50)-(?:year|yr)\b(?!\s+(?:high|low|record))/gi],
   ["term", /\b(?:10|15|20|25|30|40|50)\s(?:year|yr)\s(?:fixed|mortgage|loan|term|rate|ARM|treasury|note|bond)\b/gi],
   ["term", /\b\d{1,2}yrs?\b/gi],
   ["term", /\b(?:52|26|13|4)-week\b|\b(?:12|6|3|18|24|36)-month\b/gi], // "a 52-week high", "a 12-month range"
+  // The same terms in Spanish: "hipoteca a 30 años", "52 semanas", "12 meses".
+  ["term", /\b(?:10|15|20|25|30|40|50)\s+años\b|\b(?:52|26|13|4)\s+semanas\b|\b(?:12|6|3|18|24|36)\s+meses\b/gi],
   ["term", /\b\d{1,2}\/\d{1,2}\s?ARMs?\b/g],
-  ["term", /\b24\/7\b|\b50\/50\b|\b401\s?\(?k\)?|\b1031\s+exchanges?\b|\b(?:55|62)\+/gi],
+  ["term", /\b24\/7\b|\b50\/50\b|\b401\s?\(?k\)?|\b1031\s+exchanges?\b/gi],
+  // Age-qualified (55+) communities: "55+", "55 and older", "55-plus", "#55Plus", "62 or over", "55 y más".
+  ["term", /\b(?:55|62)\s*(?:\+|-?\s?plus\b|and\s+(?:older|over|up)\b|or\s+(?:older|over)\b|y\s+más)/gi],
   ["term", /(?<![$\d.,])\b\dK\b/g], // 4K video, a 5K run
   ["idiom", /\b1[01]0\s?%/g],
   ["ordinal", /\b\d+(?:st|nd|rd|th)\b/gi],
@@ -75,11 +83,21 @@ function decimalsOf(frac) {
   return frac ? frac.length - 1 : 0;
 }
 
+// Spanish writes 390.225 for 390,225 and 7,40 for 7.40. Swapping the separators keeps every index in place.
+// A comma before exactly three digits stays a thousands separator ("$390,225" written the US way).
+function spanishSeparators(s) {
+  return s
+    .replace(/\d{1,3}(?:\.\d{3})+(?![\d.])(?:,\d+)?/g, (m) => m.replace(/[.,]/g, (c) => (c === "." ? "," : ".")))
+    .replace(/(\d),(\d{1,2})(?!\d)/g, "$1.$2");
+}
+
 /** Every number in a text: [{ raw, value, unit: "%"|"$"|"days"|"", index, kind, step }].
- *  "$489K" → 489000, "12 percent" → 12, "1.2 million" → 1200000. `step` is the rounding the text implies. */
-export function extractNumbers(text) {
-  const s = String(text ?? "");
-  if (!/\d/.test(s)) return [];
+ *  "$489K" → 489000, "12 percent" → 12, "1.2 million" → 1200000. `step` is the rounding the text implies.
+ *  opts.lang "es": Spanish separators ("$390.225", "7,40 %"). */
+export function extractNumbers(text, { lang = "en" } = {}) {
+  const original = String(text ?? "");
+  if (!/\d/.test(original)) return [];
+  const s = lang === "es" ? spanishSeparators(original) : original;
   const ranges = maskRanges(s);
   const out = [];
   NUM_RE.lastIndex = 0;
@@ -115,12 +133,12 @@ export function extractNumbers(text) {
 
     let unit = dollar ? "$" : "";
     let unitText = "";
-    const pct = /^(?:\s?%|\s(?:percent|per cent|percentage points?|pct)\b)/i.exec(after);
+    const pct = /^(?:\s?%|\s(?:percent|per cent|por ciento|percentage points?|pct)\b)/i.exec(after);
     if (pct) { unit = "%"; unitText = pct[0]; }
     else if (/^(?:\s?\/\s?\d+(?:\.\d+)?)+\s?%/.test(after) || /^\s?[–-]\s?\d+(?:\.\d+)?\s?%/.test(after)) unit = "%";
     else if (/^\s?dollars\b/i.test(after)) { unit = "$"; }
     else {
-      const d = /^\s?-?\s?days?\b/i.exec(after);
+      const d = /^\s?-?\s?(?:days?|días?)(?![\p{L}])/iu.exec(after);
       if (d) { unit = "days"; unitText = d[0]; }
     }
     if (unitText) end += unitText.length;
@@ -145,7 +163,7 @@ export function extractNumbers(text) {
       else if (isInt && !dollar && unit !== "%" && Math.abs(base) <= 10) kind = "count";
       else kind = "num";
     }
-    const raw = s.slice(index, end).trim();
+    const raw = original.slice(index, end).trim();
     out.push({ raw, value, unit, index, kind, step });
   }
   return out;
@@ -202,12 +220,13 @@ export function suppliedFrom(...parts) {
 }
 
 /** The numbers in `text` that nobody supplied: [{ raw, value }] (each raw once). Quantities only; the free kinds and
- *  her own numbers (`userText`) are allowed. `supplied` may be numbers, strings, arrays or facts (see suppliedFrom). */
-export function unknownNumbers(text, supplied, { userText = "" } = {}) {
+ *  her own numbers (`userText`) are allowed. `supplied` may be numbers, strings, arrays or facts (see suppliedFrom).
+ *  opts.lang "es" reads Spanish number formats in `text`. */
+export function unknownNumbers(text, supplied, { userText = "", lang = "en" } = {}) {
   const allowed = suppliedFrom(supplied, userText);
   const out = [];
   const seen = new Set();
-  for (const n of extractNumbers(text)) {
+  for (const n of extractNumbers(text, { lang })) {
     if (n.kind !== "num") continue;
     if (allowed.some((v) => numberMatches(n, v))) continue;
     if (seen.has(n.raw)) continue;

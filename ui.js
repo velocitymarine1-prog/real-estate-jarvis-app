@@ -329,3 +329,16 @@ export function deviceLabel() {
   return `${dev} · ${where}`;
 }
 export function reducedMotion() { return matchMedia("(prefers-reduced-motion: reduce)").matches; }
+
+// her profile's limits (the Worker's, shared/schemas.js Profile) and the names of its fields, so a refused field is named plainly
+export const PROFILE_LIMITS = { firstName: 40, brokerage: 120, team: 80, cta: 80, voice: 2200 };
+export const PROFILE_LABEL = { firstName: "Your first name", name: "Your first name", brokerage: "Your brokerage's licensed name", team: "Team name",
+  areas: "Where you sell", helps: "Who you help", tone: "Your tone", camera: "On camera", platforms: "Where you post", cta: "Your call to action",
+  weeklyGoal: "Weekly goal", voice: "Your captions", notifyTime: "The heads-up time", defaults: "Your usual video", tz: "Time zone" };
+export function profileField(e) { return String((e && e.field) || "").replace(/^profile\./, "").split(/[.[]/)[0]; }
+export function fieldSentence(e) {
+  const f = profileField(e), label = PROFILE_LABEL[f];
+  if (!label) return (e && e.reason) || "Something in your profile needs a look.";
+  const max = PROFILE_LIMITS[f];
+  return `Check “${label}”: ${max ? `${max.toLocaleString("en-US")} characters at most${f === "voice" ? " for each caption" : ""}.` : "it needs a look."}`;
+}

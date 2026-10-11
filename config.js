@@ -2,7 +2,7 @@
 export const APP_NAME = "Javi's Real Estate Jarvis";
 export const SHORT_NAME = "Jarvis";
 export const GIFT_NOTE = "Happy birthday! I made this for you. — Isaac";
-export const BUILD = "36d47c4";
+export const BUILD = "582cf04";
 
 // The Web Push key pair's public half (tools/vapid.js made it; the private half is the Worker secret VAPID_PRIVATE)
 export const VAPID_PUBLIC = "BFfdB5_LJtl4lYcTuHfe0M1IWXdCsRActHAYi3FS3Llw8Muyd-S7jCyS-nX06c-av4dFUk7aEVs3-n6bpOmoCKo";

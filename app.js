@@ -6,6 +6,7 @@ import { api, health, event, onAuthLost } from "./api.js";
 import { parse, go, onRoute } from "./router.js";
 import { h, icon, replace, toast, closeSheet } from "./ui.js";
 import { easternDate } from "./shared/time.js";
+import * as push from "./push.js";
 
 // ------------------------------------------------------------------ errors are counted on <body> (check-live.sh and the driver read them)
 let errors = 0;
@@ -51,7 +52,17 @@ function guard(r) {
   return r;
 }
 
+let guarding = false;
 async function render(route) {
+  // the page on screen may ask first (the prompter, with a take she hasn't saved): if she stays, the address goes back
+  if (current && current.canLeave && !guarding) {
+    const here = current.hash;
+    guarding = true;
+    let ok = true;
+    try { ok = await current.canLeave(); } catch { ok = true; } finally { guarding = false; }
+    if (!ok) { if (here && location.hash !== here) history.replaceState(history.state, "", here); return; }
+    current.canLeave = null;
+  }
   const seq = ++renderSeq;
   let r = guard(route);
   if (r !== route) {
@@ -86,11 +97,14 @@ async function render(route) {
   replace(view);
   const root = h("div", { class: "view-root view-" + r.name });
   view.append(root);
-  let cleanup = null;
-  try { cleanup = await mod.default.mount(root, r); }
+  let cleanup = null, canLeave = null;
+  try {
+    const m = await mod.default.mount(root, r);
+    if (typeof m === "function") cleanup = m; else if (m) { cleanup = m.cleanup || null; canLeave = m.canLeave || null; }
+  }
   catch (e) { console.error(e); bump(e && e.message); root.append(h("p", { class: "muted", text: "Something went wrong showing this page." })); }
   if (seq !== renderSeq) { try { cleanup && cleanup(); } catch { /* */ } return; }
-  current = { name: r.name, cleanup };
+  current = { name: r.name, cleanup, canLeave, hash: location.hash };
   window.scrollTo(0, spec.tab && scrolls[r.name] ? scrolls[r.name] : 0);
   if (route.name !== r.name || !current) view.focus({ preventScroll: true });
   store.emit("routed", r);
@@ -125,6 +139,7 @@ async function checkHealth(force = false) {
 }
 async function refreshMe() {
   if (!signedIn()) return;
+  if (store.live.me && store.live.me._dirtyProfile) return;     // her change made offline goes up first (sendUnsaved)
   try {
     const r = await api("GET", "/me");
     if (r && r.user) store.setMe(r);
@@ -136,29 +151,77 @@ function dailyOpen() {
   if (store.get("openedOn") !== today) { store.set("openedOn", today); event("open"); }
 }
 
-let swReg = null;
+// edits made offline (marked on the phone by the script page) go up when the phone is back: at launch, on reconnect, at the front
+let sending = false;
+async function sendUnsaved() {
+  if (sending || !signedIn() || !navigator.onLine) return;
+  sending = true;
+  try {
+    const me = store.live.me;
+    if (me && me._dirtyProfile && me.user) {
+      try {
+        const res = await api("PUT", "/me", { name: me.user.name || undefined, profile: me.user.profile || {} });
+        if (res && res.user) store.setMe(res);
+      } catch (e) {
+        if (e.kind === "bad_field") store.setMe({ ...me, _dirtyProfile: false });      // You names the field when she opens it
+        else return;
+      }
+    }
+    for (const r of store.dirtyRows()) {
+      if (r.id === store.live.editing || !r.script) continue;        // the open script page sends its own
+      try {
+        const res = await api("PATCH", `/ideas/${encodeURIComponent(r.id)}`, { script: r.script });
+        if (res && res.idea) store.saveIdea(res.idea, { clean: true });
+      } catch (e) {
+        if (e.status === 404) store.dropIdea(r.id);
+        else if (e.kind === "too_big") continue;                      // she shortens it on the script page
+        else break;                                                    // offline again, or the Worker is busy: next time
+      }
+    }
+  } finally { sending = false; }
+}
+window.addEventListener("online", () => { setTimeout(sendUnsaved, 300); });
+
+// the morning heads-up: the subscription is posted again once a day while it's on (a push service can drop one quietly; the
+// Worker keeps one row per endpoint), so You's switch never says On for a heads-up that stopped
+function refreshPush() {
+  if (!signedIn() || !push.state().on) return;
+  const today = easternDate();
+  if (store.get("pushRefreshedOn") === today) return;
+  push.refresh().then(() => store.set("pushRefreshedOn", today)).catch(() => {});
+}
+
+// a new build: it installs in the background, and takes over the next time the app comes to the front (or at once if the app is in
+// the back already). The page reloads on any takeover it asked for, so it never runs one build's code with the next one's files
+let swReg = null, askedSkip = false;
 function takeWaitingBuild() {
   if (!swReg || !swReg.waiting || !navigator.serviceWorker.controller) return;
   const busy = document.body.dataset.route === "prompter" || (document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName));
-  if (!busy) swReg.waiting.postMessage({ type: "SKIP_WAITING" });
+  if (busy) return;
+  askedSkip = true;
+  swReg.waiting.postMessage({ type: "SKIP_WAITING" });
 }
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
+  if (document.visibilityState !== "visible") { if (swReg && swReg.waiting) takeWaitingBuild(); return; }
   store.emit("front");
   checkHealth();
   dailyOpen();
+  sendUnsaved();
   if (swReg) { swReg.update().catch(() => {}); takeWaitingBuild(); }
 });
 
 async function registerSW() {
   if (!("serviceWorker" in navigator) || new URLSearchParams(location.search).get("sw") === "0") return;
   try {
-    swReg = await navigator.serviceWorker.register("sw.js", { scope: "./" });
     let reloading = false;
-    const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (!hadController || reloading) return;
+      if (!askedSkip || reloading) return;          // the first install claiming the page is the same build: nothing to reload
       reloading = true; location.reload();
+    });
+    swReg = await navigator.serviceWorker.register("sw.js", { scope: "./" });
+    swReg.addEventListener("updatefound", () => {
+      const w = swReg.installing;
+      if (w) w.addEventListener("statechange", () => { if (w.state === "installed" && document.visibilityState === "hidden") takeWaitingBuild(); });
     });
   } catch (e) { console.warn("service worker", e && e.message); }
 }
@@ -186,7 +249,8 @@ async function boot() {
   document.body.dataset.booted = "1";
   registerSW();
   checkHealth(true);
-  if (signedIn()) { refreshMe().then(() => { dailyOpen(); }); }
+  if (signedIn()) { refreshMe().then(() => { dailyOpen(); }); sendUnsaved(); refreshPush(); }
+  window.__jarvis.sendUnsaved = sendUnsaved;
 }
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();

@@ -12,6 +12,9 @@ import {
 import { easternDate, shortDate, weekdayShort } from "../shared/time.js";
 
 const MODES = [["topic", "Ideas"], ["listing", "From a listing"], ["remix", "Remix a video"], ["week", "Plan my week"]];
+// ideas being written: kept here, not on the page, so leaving the Studio doesn't throw away ideas already paid for. Coming back while
+// they're on their way shows the writing state; once they land they're the Studio's results (also saved for the next visit)
+let inflight = null;
 const LENGTHS = [15, 30, 45, 60, 90];
 const LISTING_MAX = 4000, TOPIC_MAX = 500;
 
@@ -25,7 +28,7 @@ export default {
       options: { platform: "reels", lengthSec: 30, appear: "camera", ...(prof.defaults || {}), ...(saved.options || {}) },
       seed: null,
       results: saved.results || null,          // { ids, mode, label }
-      busy: false, error: null, ctrl: null,
+      busy: false, error: null,
     };
     let alive = true;
     const persist = () => store.set("studio", { mode: st.mode, text: st.text, options: st.options, results: st.results });
@@ -228,7 +231,7 @@ export default {
 
     // ---------------------------------------------------------------- actions
     async function run() {
-      if (st.busy) return;
+      if (st.busy || inflight) return;
       const why = blocked();
       if (why) { toast(why); return; }
       const body = { options: { ...st.options } };
@@ -254,21 +257,31 @@ export default {
       } else {
         body.mode = "week"; label = "Your week";
       }
-      st.busy = true; st.error = null; st.ctrl = new AbortController();
+      const job = { ctrl: new AbortController(), mode: body.mode, label, error: null, results: null };
+      job.promise = (async () => {
+        try {
+          const r = await api("POST", "/ideas", body, { signal: job.ctrl.signal, timeout: 90000 });
+          const rows = (r && r.ideas) || [];
+          store.saveIdeas(rows);
+          if (body.text && (body.mode === "topic" || body.mode === "listing")) for (const x of rows) store.noteUserText(x.id, body.text);
+          job.results = { ids: rows.map(x => x.id), mode: body.mode, label };
+          store.set("studio", { ...(store.get("studio") || {}), results: job.results });
+        } catch (e) {
+          if (e.kind !== "aborted") job.error = e;
+        } finally { if (inflight === job) inflight = null; }
+      })();
+      inflight = job;
+      st.busy = true; st.error = null;
       redrawStatus();
-      try {
-        const r = await api("POST", "/ideas", body, { signal: st.ctrl.signal, timeout: 90000 });
-        const rows = (r && r.ideas) || [];
-        store.saveIdeas(rows);
-        if (body.text && (body.mode === "topic" || body.mode === "listing")) for (const x of rows) store.noteUserText(x.id, body.text);
-        st.results = { ids: rows.map(x => x.id), mode: body.mode, label };
-        persist();
-      } catch (e) {
-        if (e.kind !== "aborted") st.error = e;
-      } finally {
-        st.busy = false; st.ctrl = null;
-        if (alive) { draw(); if (st.results && !st.error) els.results.scrollIntoView({ block: "start", behavior: "smooth" }); }
-      }
+      await follow(job);
+    }
+    // the page waits for ideas being written (started here, or before she left and came back)
+    async function follow(job) {
+      await job.promise;
+      st.busy = false;
+      if (job.results) st.results = job.results;
+      st.error = job.error;
+      if (alive) { draw(); if (job.results && !job.error) els.results.scrollIntoView({ block: "start", behavior: "smooth" }); }
     }
     function redrawStatus() {
       if (!alive) return;
@@ -276,7 +289,15 @@ export default {
       replace(els.status, statusNote());
       replace(els.results, results());
     }
-    function cancel() { if (st.ctrl) st.ctrl.abort(); }
+    // the notices and buttons only, never the composer she may be typing in (the keyboard and dictation stay put)
+    function controls() {
+      if (!alive) return;
+      updateGo();
+      replace(els.status, statusNote());
+      for (const c of root.querySelectorAll(".seeds .choice")) c.disabled = !!blocked();
+      if (!st.busy) replace(els.results, results());
+    }
+    function cancel() { if (inflight) inflight.ctrl.abort(); }
 
     async function toggleSave(row) {
       const inPlan = ["saved", "scripted", "filmed", "posted"].includes(row.status);
@@ -324,9 +345,10 @@ export default {
     }
 
     draw();
-    const offs = [store.on("online", () => { draw(); }), store.on("health", () => draw())];
-    if (q.go === "1") { history.replaceState(history.state, "", "#/studio"); if (!blocked()) run(); }
-    return () => { alive = false; if (st.ctrl) st.ctrl.abort(); offs.forEach(f => f()); };
+    const offs = [store.on("online", controls), store.on("health", controls)];
+    if (inflight) { st.busy = true; redrawStatus(); follow(inflight); }
+    else if (q.go === "1") { history.replaceState(history.state, "", "#/studio"); if (!blocked()) run(); }
+    return () => { alive = false; offs.forEach(f => f()); };
   },
 };
 

@@ -433,7 +433,8 @@ table.values tr.latest td { font-weight: 700; color: var(--lake); }
 .edit:focus { outline: none; border-color: var(--lake); background: var(--surface); box-shadow: 0 0 0 3px color-mix(in srgb, var(--lake) 18%, transparent); }
 .edit.title { font: 700 26px/1.15 var(--display); letter-spacing: -.01em; }
 .edit.say { font: 600 17px/1.4 var(--sans); }
-.edit.small { font-size: 15px; line-height: 1.4; }
+.edit.small { font-size: 16px; line-height: 1.4; }      /* 16 px at least: iPhone zooms into a smaller field */
+input, textarea, select { font-size: max(16px, 1em); }
 .save-state { font-size: 13px; color: var(--muted); min-height: 18px; }
 .view-you .save-state { margin: -8px 0 18px; }
 .versions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -544,6 +545,7 @@ table.values tr.latest td { font-weight: 700; color: var(--lake); }
 .p-msg p { font-size: 15.5px; line-height: 1.45; color: #D5DEDC; }
 .p-msg .btns .btn { flex: 1 1 auto; }
 .take { position: absolute; inset: 0; z-index: 8; background: #000; display: grid; grid-template-rows: 1fr auto; }
+.take-top { position: absolute; z-index: 2; top: 0; left: 0; padding: calc(var(--safe-t) + 8px) 12px 8px calc(12px + var(--safe-l)); }
 .take video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .take .acts { padding: 14px calc(16px + var(--safe-r)) calc(var(--safe-b) + 18px) calc(16px + var(--safe-l)); display: grid; gap: 10px; background: #0b1214; }
 .take .acts .btns .btn { flex: 1 1 0; }

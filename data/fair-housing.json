@@ -8,53 +8,87 @@
       "why": "The Fair Housing Act's rule on ads (24 CFR 100.75) bars words that \"convey that dwellings are available or not available to a particular group\"; HUD's 1995 guidance named a preference \"for adults, couples or singles\". Describe the home instead (NAR's examples: \"4 bedrooms, fenced yard\", \"single-story\").",
       "fixLabel": "Say what the home has, not who should live there",
       "phrases": [
-        { "re": "\\b(perfect|great|ideal|made|designed|built|best|good|wonderful|excellent|suited|meant|fit)\\s+for\\s+(?:a\\s+|the\\s+)?(?:young\\s+|growing\\s+|new\\s+|small\\s+|large\\s+|big\\s+|mature\\s+|older\\s+|active\\s+)?(?:families|family|kids|children|couples|singles|young professionals|professionals|empty[- ]nesters|retirees|seniors|newlyweds|bachelors|adults|students)\\b", "replace": "$1 for you" },
-        { "re": "\\b(?:family|kid|child|children)[- ]friendly\\b", "replace": "", "label": "Take it out and name the features (4 bedrooms, fenced yard)" },
-        { "re": "\\b(?:young|growing|starter)\\s+famil(?:y|ies)\\b", "replace": "buyers" },
-        { "re": "\\byoung\\s+couples?\\b", "replace": "buyers" },
-        { "re": "\\byoung professionals\\b", "replace": "buyers" },
-        { "re": "\\bempty[- ]nesters?\\b", "replace": "buyers" },
-        { "re": "\\bretirees\\b", "replace": "buyers" },
-        { "re": "\\bnewlyweds\\b", "replace": "buyers" },
-        { "re": "\\bmature\\s+(?:adults|couples|persons|people|individuals|buyers|residents)\\b", "replace": "buyers" },
-        { "re": "\\bbachelor\\s+pad\\b", "replace": "home" },
-        { "re": "\\badults?[- ]only\\b", "replace": "" },
-        { "re": "\\bno\\s+(?:children|kids|families)\\b", "replace": "" },
-        { "re": "\\b(?:singles|couples)\\s+only\\b", "replace": "" }
+        {"re": "\\b(perfect|great|ideal|made|designed|built|best|good|wonderful|excellent|suited|meant|fit)\\s+for\\s+(?:a\\s+|an\\s+|the\\s+|your\\s+)?(?:young\\s+|growing\\s+|new\\s+|small\\s+|large\\s+|big\\s+|mature\\s+|older\\s+|active\\s+|retired\\s+|married\\s+|single\\s+)?(?:families|family(?:\\s+of\\s+(?:two|three|four|five|six|seven|eight|\\d+))?(?![- ]?(?:gatherings?|get[- ]togethers?|movies?|nights?|dinners?|meals?|fun|rooms?|time|games?|events?|parties|party|reunions?|holidays?|celebrations?|photos?|portraits?|style|sized?|owned|business|vacations?|trips?|barbecues?|bbqs?|cookouts?|brunch|breakfasts?|traditions?|memories|visits?|members|pets?)\\b)|kids|children|couples|couple(?!\\s+(?:of|more|minutes?|hours?|days?|weeks?|months?|years?|blocks?|miles?|times?|things?|steps?|houses?|homes?|doors?|streets?|seconds?|bedrooms?|baths?|rooms?|options?|ways?|tips?|questions?|spots?|places?|showings?)\\b)|singles|(?:single|young)\\s+professionals?|professionals|empty[- ]nesters?|retirees|seniors|newlyweds|bachelors|adults|students)(?!['’])\\b", "replace": "$1 for you"},
+        {"re": "\\b(?:most\\s+|very\\s+|so\\s+|super\\s+|really\\s+|extremely\\s+)?(?:family|kid|child|children)[- ]friendly\\b", "replace": "", "label": "Take it out and name the features (4 bedrooms, fenced yard)"},
+        {"re": "\\b(?:very\\s+)?family[- ]oriented\\b", "replace": "", "label": "Take it out and name the features (4 bedrooms, fenced yard)"},
+        {"re": "\\bfamily\\s+(neighborhoods?|neighbourhoods?|communit(?:y|ies)|streets?|areas?|subdivisions?)\\b", "replace": "$1"},
+        {"re": "\\badult\\s+(communit(?:y|ies)|living|neighborhoods?)\\b", "replace": "$1"},
+        {"re": "\\ban?\\s+(?:young|growing|starter)\\s+family['’]s\\b", "replace": "your"},
+        {"re": "\\ban?\\s+(?:young|growing|starter)\\s+family\\b(?![- ]?(?:gatherings?|get[- ]togethers?|movies?|nights?|dinners?|meals?|fun|rooms?|time|games?|events?|parties|party|reunions?|holidays?|celebrations?|photos?|portraits?|style|sized?|owned|business|vacations?|trips?|barbecues?|bbqs?|cookouts?|brunch|breakfasts?|traditions?|memories|visits?|members|pets?)\\b)", "replace": "you"},
+        {"re": "\\b(?:young|growing|starter)\\s+families\\b", "replace": "buyers"},
+        {"re": "\\ban?\\s+(?:young\\s+|retired\\s+|married\\s+|older\\s+|newlywed\\s+)?couple\\b(?!\\s+(?:of|more|minutes?|hours?|days?|weeks?|months?|years?|blocks?|miles?|times?|things?|steps?|houses?|homes?|doors?|streets?|seconds?|bedrooms?|baths?|rooms?|options?|ways?|tips?|questions?|spots?|places?|showings?)\\b)(?!['’])", "replace": "a buyer"},
+        {"re": "\\b(?:young|retired|married|older|newlywed)\\s+couples\\b", "replace": "buyers"},
+        {"re": "\\bcouples['’](?!\\w)", "replace": "buyers'"},
+        {"re": "\\bcouples\\b(?!['’])", "replace": "buyers"},
+        {"re": "\\bsingles\\b(?!\\s+(?:tennis|matches?|games?|bars?|charts?|records?|events?))", "replace": "buyers"},
+        {"re": "\\ban?\\s+young\\s+professional\\b", "replace": "a buyer"},
+        {"re": "\\byoung\\s+professionals\\b", "replace": "buyers"},
+        {"re": "\\ban?\\s+empty[- ]nester['’]s\\b", "replace": "a buyer's"},
+        {"re": "\\ban?\\s+empty[- ]nester\\b(?!['’])", "replace": "a buyer"},
+        {"re": "\\bempty[- ]nesters['’](?!\\w)", "replace": "buyers'"},
+        {"re": "\\bempty[- ]nesters\\b", "replace": "buyers"},
+        {"re": "\\bempty[- ]nester['’]s\\b", "replace": "buyer's"},
+        {"re": "\\bempty[- ]nester\\b", "replace": "buyer"},
+        {"re": "\\ban?\\s+retiree\\b(?!['’])", "replace": "a buyer"},
+        {"re": "\\bretirees['’](?!\\w)", "replace": "buyers'"},
+        {"re": "\\bretirees\\b", "replace": "buyers"},
+        {"re": "\\bretiree['’]s\\b", "replace": "buyer's"},
+        {"re": "\\bnewlyweds['’](?!\\w)", "replace": "buyers'"},
+        {"re": "\\bnewlyweds\\b", "replace": "buyers"},
+        {"re": "\\bmature\\s+(?:adults|couples|persons|people|individuals|buyers|residents)\\b", "replace": "buyers"},
+        {"re": "\\bbachelor\\s+pad\\b", "replace": "home"},
+        {"re": "\\badults?[- ]only\\b", "remove": true},
+        {"re": "\\bno\\s+(?:children|kids|families)\\b", "remove": true},
+        {"re": "\\b(?:singles|couples)\\s+only\\b", "remove": true}
       ],
-      "except": ["single-family", "single family", "single-story", "single story", "single-level", "family room", "mature trees", "mature landscaping", "mature oaks", "55+"]
+      "except": [
+        "single-family",
+        "single family",
+        "single-story",
+        "single story",
+        "single-level",
+        "family room",
+        "mature trees",
+        "mature landscaping",
+        "mature oaks",
+        "55+",
+        {"re": "\\bcouple\\s+of\\b"}
+      ]
     },
     "fh.protected": {
       "severity": "amber",
       "why": "The same rule (24 CFR 100.75) covers race, color, religion, sex, disability, familial status and national origin; Florida's Fair Housing Act has the same classes. Describe the property and the amenities, never the people who live there or should.",
       "fixLabel": "Take out the sentence; describe the property and the amenities",
       "phrases": [
-        { "re": "\\b(?:christian|catholic|jewish|muslim|islamic|hindu|buddhist|mormon|lds|protestant|baptist|evangelical|amish|hispanic|latino|latina|latinx|asian|black|white|african[- ]american|caucasian|european|mexican|cuban|puerto rican|haitian|indian|chinese|korean|vietnamese|filipino|arab|russian|immigrant|foreign|gay|lesbian)\\s+(?:community|communities|neighborhoods?|neighbourhoods?|areas?|enclaves?|families|family|buyers|tenants|renters|residents|neighbors|neighbours|people|folks|crowd|households?)\\b", "remove": true },
-        { "re": "\\bethnic(?:ally)?\\b", "remove": true },
-        { "re": "\\benglish[- ](?:speaking|only)\\b", "remove": true },
-        { "re": "\\bno\\s+(?:foreigners|immigrants|wheelchairs|disabled|handicapped|section 8)\\b", "remove": true },
-        { "re": "\\b(?:racially\\s+)?integrated\\s+(?:neighborhoods?|communit(?:y|ies)|areas?|schools?)\\b", "remove": true },
-        { "re": "\\bsegregated\\b", "remove": true },
-        { "re": "\\bable[- ]bodied\\b", "remove": true },
-        { "re": "\\bphysically\\s+fit\\b", "remove": true },
-        { "re": "\\bmentally\\s+(?:ill|handicapped|disabled)\\b", "remove": true },
-        { "re": "\\bhandicapped\\s+(?:people|persons|buyers|residents|tenants)\\b", "remove": true },
-        { "re": "\\b(?:male|female|men|women|ladies|gentlemen|man|woman)(?:['’]s)?\\s+only\\b", "remove": true },
-        { "re": "\\b(perfect|great|ideal|made|designed|built|best|good|suited|meant)\\s+for\\s+(?:a\\s+)?(?:single\\s+)?(?:men|women|man|woman|ladies|gentlemen|guys|girls|gals)\\b", "replace": "$1 for you" }
+        {"re": "\\b(?:christian|catholic|jewish|muslim|islamic|hindu|buddhist|mormon|lds|protestant|baptist|evangelical|amish|hispanic|latino|latina|latinx|asian|black|white|african[- ]american|caucasian|european|mexican|cuban|puerto rican|haitian|indian|chinese|korean|vietnamese|filipino|arab|russian|immigrant|foreign|gay|lesbian)\\s+(?:community|communities|neighborhoods?|neighbourhoods?|areas?|enclaves?|families|family|buyers|tenants|renters|residents|neighbors|neighbours|people|folks|crowd|households?)\\b", "remove": true},
+        {"re": "\\bethnic(?:ally)?\\b", "remove": true},
+        {"re": "\\benglish[- ](?:speaking|only)\\b", "remove": true},
+        {"re": "\\bno\\s+(?:foreigners|immigrants|wheelchairs|disabled|handicapped|section 8)\\b", "remove": true},
+        {"re": "\\b(?:racially\\s+)?integrated\\s+(?:neighborhoods?|communit(?:y|ies)|areas?|schools?)\\b", "remove": true},
+        {"re": "\\bsegregated\\b", "remove": true},
+        {"re": "\\bable[- ]bodied\\b", "remove": true},
+        {"re": "\\bphysically\\s+fit\\b", "remove": true},
+        {"re": "\\bmentally\\s+(?:ill|handicapped|disabled)\\b", "remove": true},
+        {"re": "\\bhandicapped\\s+(?:people|persons|buyers|residents|tenants)\\b", "remove": true},
+        {"re": "\\b(?:male|female|men|women|ladies|gentlemen|man|woman)(?:['’]s)?\\s+only\\b", "remove": true},
+        {"re": "\\b(perfect|great|ideal|made|designed|built|best|good|suited|meant)\\s+for\\s+(?:a\\s+)?(?:single\\s+)?(?:men|women|man|woman|ladies|gentlemen|guys|girls|gals)\\b(?![- ]?(?:caves?|cave|shed|sheds|spaces?|rooms?)\\b)", "replace": "$1 for you"}
       ],
-      "except": ["wheelchair accessible", "wheelchair-accessible", "handicap accessible"]
+      "except": ["wheelchair accessible", "wheelchair-accessible", "handicap accessible", "man cave", "man-cave", "she shed"]
     },
     "fh.safe": {
       "severity": "amber",
       "why": "\"Safe\" and \"exclusive\" are subjective and can read as steering; fair housing guides offer the feature instead (a gated community, lit walking paths) or leaving it out.",
       "fixLabel": "Name the feature instead, or leave it out",
       "phrases": [
-        { "re": "\\b(?:very\\s+|really\\s+|super\\s+|so\\s+)?safe\\s+(neighborhoods?|neighbourhoods?|areas?|communit(?:y|ies)|streets?|place to live|part of town|suburbs?|towns?|city|subdivisions?)\\b", "replace": "$1", "replaceIf": [{ "when": "\\bgated\\b", "replace": "gated community" }] },
-        { "re": "\\bthe\\s+safest\\s+(neighborhoods?|areas?|communit(?:y|ies)|cit(?:y|ies)|towns?|suburbs?|places?)\\b", "replace": "the $1" },
-        { "re": "\\blow[- ]crime\\b", "replace": "" },
-        { "re": "\\bcrime[- ]free\\b", "replace": "" },
-        { "re": "\\bno\\s+crime\\b", "remove": true },
-        { "re": "\\bexclusive\\s+(neighborhoods?|areas?|communit(?:y|ies)|enclaves?|subdivisions?|streets?)\\b", "replace": "$1" }
+        {"re": "\\bsafe(?:,|\\s+and)\\s+(quiet)\\b", "replace": "$1"},
+        {"re": "\\b(?:a|an)\\s+(?:very\\s+|really\\s+|super\\s+|so\\s+)?safe\\s+place\\s+to\\s+(?:raise|bring\\s+up)\\s+(?:kids|children|a\\s+family|your\\s+(?:kids|family|children))\\b", "replace": "a great place to call home"},
+        {"re": "\\b(?:very\\s+|really\\s+|super\\s+|so\\s+)?safe\\s+place\\s+to\\s+(?:raise|bring\\s+up)\\s+(?:kids|children|a\\s+family|your\\s+(?:kids|family|children))\\b", "replace": "great place to call home"},
+        {"re": "\\b(?:very\\s+|really\\s+|super\\s+|so\\s+)?safe\\s+(neighborhoods?|neighbourhoods?|areas?|communit(?:y|ies)|streets?|place to live|part of town|suburbs?|towns?|city|subdivisions?)\\b", "replace": "$1", "replaceIf": [{"when": "\\bgated\\b", "replace": "gated community"}]},
+        {"re": "\\bthe\\s+safest\\s+(neighborhoods?|areas?|communit(?:y|ies)|cit(?:y|ies)|towns?|suburbs?|places?)\\b", "replace": "the $1"},
+        {"re": "\\blow[- ]crime\\b", "replace": ""},
+        {"re": "\\bcrime[- ]free\\b", "replace": ""},
+        {"re": "\\bno\\s+crime\\b", "remove": true},
+        {"re": "\\bexclusive\\s+(neighborhoods?|areas?|communit(?:y|ies)|enclaves?|subdivisions?|streets?)\\b", "replace": "$1"}
       ],
       "except": ["safe room", "storm-safe", "safe from"]
     },
@@ -63,9 +97,9 @@
       "why": "Factual school details are fine, but an unnamed \"great schools\" reads as a preference, and zoning varies by address. Name the school with its state grade and year (\"Lake Mary High, an A school in 2026\"), and only say a home is zoned for a school when you've checked that address.",
       "text": "Name the school instead of '{match}'",
       "phrases": [
-        { "re": "\\b(?:great|good|best|top|top[- ]rated|excellent|amazing|awesome|fantastic|highly[- ]rated|a[- ]rated|award[- ]winning|strong|stellar|the\\s+best)\\s+schools?\\b", "unlessSchoolNamed": true },
-        { "re": "\\b(?:great|good|best|top|top[- ]rated|excellent|amazing|highly[- ]rated|a[- ]rated|sought[- ]after)\\s+school\\s+(?:districts?|zones?|systems?)\\b", "unlessSchoolNamed": true },
-        { "re": "\\bzoned\\s+for\\b", "unlessUserSaid": true, "text": "Check the zoning: '{match}' a school varies by address" }
+        {"re": "\\b(?:great|good|best|top|top[- ]rated|excellent|amazing|awesome|fantastic|highly[- ]rated|a[- ]rated|award[- ]winning|strong|stellar|the\\s+best)\\s+schools?\\b", "unlessSchoolNamed": true},
+        {"re": "\\b(?:great|good|best|top|top[- ]rated|excellent|amazing|highly[- ]rated|a[- ]rated|sought[- ]after)\\s+school\\s+(?:districts?|zones?|systems?)\\b", "unlessSchoolNamed": true},
+        {"re": "\\bzoned\\s+for\\b", "unlessUserSaid": true, "text": "Check the zoning: '{match}' a school varies by address"}
       ]
     },
     "fh.places": {
@@ -73,21 +107,21 @@
       "why": "Conservative state guidance (Indiana's civil rights commission) avoids \"near churches\" and \"walking distance\": say \"near places of worship\", \"convenient to\" or \"5 minutes from\".",
       "fixLabel": "Use the neutral wording",
       "phrases": [
-        { "re": "\\b(?:near|close to|next to|steps from|minutes from|around the corner from)\\s+(?:a\\s+|the\\s+|several\\s+|many\\s+|lots of\\s+)?(?:churches|church|synagogues?|mosques?|temples?)\\b", "replace": "near places of worship" },
-        { "re": "\\b(?:within\\s+|in\\s+)?(?:easy\\s+|a\\s+short\\s+|short\\s+)?walking\\s+distance\\s+(?:of|to|from)\\b", "replace": "convenient to" },
-        { "re": "\\b(?:within\\s+)?(?:easy\\s+)?walking\\s+distance\\b", "replace": "close by" },
-        { "re": "\\b(?:a|an)\\s+(?:short|easy|quick|\\d+[- ]minute)\\s+walk\\s+(?:to|from)\\b", "replace": "close to" },
-        { "re": "\\bwalk\\s+to\\b", "replace": "get to" }
+        {"re": "\\b(?:near|close to|next to|steps from|minutes from|around the corner from)\\s+(?:a\\s+|the\\s+|several\\s+|many\\s+|lots of\\s+)?(?:churches|church|synagogues?|mosques?|temples?)\\b", "replace": "near places of worship"},
+        {"re": "\\b(?:within\\s+|in\\s+)?(?:easy\\s+|a\\s+short\\s+|short\\s+)?walking\\s+distance\\s+(?:of|to|from)\\b", "replace": "convenient to"},
+        {"re": "\\b(?:within\\s+)?(?:easy\\s+)?walking\\s+distance\\b", "replace": "close by"},
+        {"re": "\\b(?:a|an)\\s+(?:short|easy|quick|\\d+[- ]minute)\\s+walk\\s+(?:to|from)\\b", "replace": "close to"},
+        {"re": "\\bwalk\\s+to\\b", "replace": "get to"}
       ],
       "except": [
-        { "re": "\\bwalk\\s+to\\s+(?:the\\s+|your\\s+)?(?:front|back|side|kitchen|living|dining|family|bed|bath|primary|master|guest|laundry|garage|pool|patio|lanai|deck|yard|backyard|closet|door|stairs|window|office|den|loft|bonus)\\b" }
+        {"re": "\\bwalk\\s+to\\s+(?:the\\s+|your\\s+)?(?:front|back|side|kitchen|living|dining|family|bed|bath|primary|master|guest|laundry|garage|pool|patio|lanai|deck|yard|backyard|closet|door|stairs|window|office|den|loft|bonus)\\b"}
       ]
     },
     "fh.primary": {
       "severity": "note",
       "why": "\"Master bedroom\" is legal (HUD's 1995 guidance cleared it), but most MLSs and many brokers now prefer \"primary\".",
       "phrases": [
-        { "re": "\\bmaster([\\s-]+(?:bed\\s?rooms?|suites?|baths?|bathrooms?|closets?|retreats?|wings?|en[- ]?suites?|showers?|tubs?|vanit(?:y|ies)|sitting\\s+areas?))\\b", "replace": "primary$1" }
+        {"re": "\\bmaster([\\s-]+(?:bed\\s?rooms?|suites?|baths?|bathrooms?|closets?|retreats?|wings?|en[- ]?suites?|showers?|tubs?|vanit(?:y|ies)|sitting\\s+areas?))\\b", "replace": "primary$1"}
       ],
       "except": ["master-planned", "master planned", "master plan"]
     },
@@ -118,35 +152,37 @@
       "fixLabel": "Take out the sentence",
       "hedged": true,
       "phrases": [
-        { "re": "\\bguarantee(?:d|s)?\\b", "remove": true },
-        { "re": "\\b(?:homes?|houses?|propert(?:y|ies)|condos?|values?|home values|prices?|it|investment|market)\\s+(?:will|is going to|are going to|is gonna|are gonna)\\s+(?:definitely\\s+|certainly\\s+|surely\\s+|only\\s+|always\\s+|keep\\s+)?(?:appreciate|appreciating|go up|going up|rise|rising|increase|gain value|double|skyrocket|be worth more)\\b", "remove": true },
-        { "re": "\\b(?:prices|values|home values|rates|mortgage rates|interest rates)\\s+(?:will|are going to|are gonna)\\s+(?:definitely\\s+|certainly\\s+|surely\\s+)?(?:go up|rise|increase|drop|fall|come down|go down|double|skyrocket|crash)\\b", "remove": true },
-        { "re": "\\bcan(?:not|['’]t|\\s+not)\\s+lose\\b", "remove": true },
-        { "re": "\\b(?:the\\s+)?best\\s+investment\\b", "remove": true },
-        { "re": "\\brisk[- ]free\\b", "remove": true },
-        { "re": "\\bsure\\s+thing\\b", "remove": true },
-        { "re": "\\b(?:never|won['’]t ever)\\s+(?:goes?|go)\\s+down\\b", "remove": true },
-        { "re": "\\b(?:always|only)\\s+goes?\\s+up\\b", "remove": true }
+        {"re": "\\bguarantee(?:d|s)?\\b", "remove": true},
+        {"re": "\\b(?:homes?|houses?|propert(?:y|ies)|condos?|values?|home values|prices?|it|investment|market)\\s+(?:will|is going to|are going to|is gonna|are gonna)\\s+(?:definitely\\s+|certainly\\s+|surely\\s+|only\\s+|always\\s+|keep\\s+)?(?:appreciate|appreciating|go up|going up|rise|rising|increase|gain value|double|skyrocket|be worth more)\\b", "remove": true},
+        {"re": "\\b(?:prices|values|home values|rates|mortgage rates|interest rates)\\s+(?:will|are going to|are gonna)\\s+(?:definitely\\s+|certainly\\s+|surely\\s+)?(?:go up|rise|increase|drop|fall|come down|go down|double|skyrocket|crash)\\b", "remove": true},
+        {"re": "\\bcan(?:not|['’]t|\\s+not)\\s+lose\\b", "remove": true},
+        {"re": "\\b(?:the\\s+)?best\\s+investment\\b", "remove": true},
+        {"re": "\\brisk[- ]free\\b", "remove": true},
+        {"re": "\\bsure\\s+thing\\b", "remove": true},
+        {"re": "\\b(?:never|won['’]t ever)\\s+(?:goes?|go)\\s+down\\b", "remove": true},
+        {"re": "\\b(?:always|only)\\s+goes?\\s+up\\b", "remove": true}
       ],
-      "except": [{ "re": "\\bGuaranteed Rate\\b", "case": true }]
+      "except": [
+        {"re": "\\bGuaranteed Rate\\b", "case": true}
+      ]
     },
     "regz": {
       "severity": "amber",
       "why": "Truth in Lending (Regulation Z, 12 CFR 1026.24(d)): a payment amount, a down payment or a number of payments in an ad for home credit is a \"trigger term\" that requires the down payment, the repayment terms and the APR. Take it out, or use your lender's disclosed example.",
       "text": "Payment terms need the full disclosure: '{match}'",
       "fixLabel": "Take out the sentence",
-      "notWhen": "\\b(?:rent|rents|rental|renting|lease|leasing|hoa|dues|utilities|utility|electric|power bill|water bill|insurance|premiums?|subscription|childcare|tuition)\\b",
+      "notWhen": "\\b(?:rent|rents|rental|renting|lease|leasing|hoa|dues|utilities|utility|electric|power bill|water bill|insurance|premiums?|subscription|childcare|tuition|prices?|values?|inventory|listings?|sales|median|yoy|y/y|year[- ]over[- ]year|a year ago|last year)\\b",
       "unlessCredit": "\\b(?:payments?|mortgage|loan|financ\\w*|down|apr|interest|lender|principal)\\b",
       "phrases": [
-        { "re": "\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?k?\\s*(?:/|a|per|each)\\s*(?:mo|month|mth)\\b", "remove": true },
-        { "re": "\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?k?\\s+monthly\\b", "remove": true },
-        { "re": "\\bmonthly\\s+payments?\\s+(?:of|around|about|under|below|near|at|is|are|from|as low as|starting at)?\\s*(?:just\\s+|only\\s+|about\\s+|around\\s+)?\\$\\s?\\d", "remove": true },
-        { "re": "\\bpayments?\\s+(?:of|as low as|from|starting at|under)\\s+(?:just\\s+|only\\s+)?\\$\\s?\\d", "remove": true },
-        { "re": "\\b\\d+(?:\\.\\d+)?\\s?(?:%|percent)\\s+down\\b(?!\\s+(?:from|on|since|vs|versus|compared|year|this|last|over|in))", "remove": true },
-        { "re": "\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?k?\\s+down\\b(?!\\s+(?:from|on|since|vs|versus|compared|year|this|last|over|in))", "remove": true },
-        { "re": "\\bdown\\s+payments?\\s+(?:of|as low as|from|starting at|is|are|just|only|under)\\s+(?:just\\s+|only\\s+)?(?:\\$\\s?\\d|\\d+(?:\\.\\d+)?\\s?(?:%|percent))", "remove": true },
-        { "re": "\\b(?:zero|nothing|0%?)\\s+down\\b|\\bno\\s+money\\s+down\\b", "remove": true },
-        { "re": "\\b\\d{2,3}\\s+(?:monthly\\s+)?payments\\b", "remove": true }
+        {"re": "\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?k?\\s*(?:/|a|per|each)\\s*(?:mo|month|mth)\\b", "remove": true},
+        {"re": "\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?k?\\s+monthly\\b", "remove": true},
+        {"re": "\\bmonthly\\s+payments?\\s+(?:of|around|about|under|below|near|at|is|are|from|as low as|starting at)?\\s*(?:just\\s+|only\\s+|about\\s+|around\\s+)?\\$\\s?\\d", "remove": true},
+        {"re": "\\bpayments?\\s+(?:of|as low as|from|starting at|under)\\s+(?:just\\s+|only\\s+)?\\$\\s?\\d", "remove": true},
+        {"re": "\\b\\d+(?:\\.\\d+)?\\s?(?:%|percent)\\s+down\\b(?!\\s+(?:from|on|since|vs\\.?|versus|compared|year|this|last|over|in|yoy|y/y|year[- ]over[- ]year|annually|month[- ]over[- ]month|m/m|week[- ]over[- ]week))", "remove": true},
+        {"re": "\\$\\s?\\d[\\d,]*(?:\\.\\d+)?\\s?k?\\s+down\\b(?!\\s+(?:from|on|since|vs\\.?|versus|compared|year|this|last|over|in|yoy|y/y|year[- ]over[- ]year|annually|month[- ]over[- ]month|m/m|week[- ]over[- ]week))", "remove": true},
+        {"re": "\\bdown\\s+payments?\\s+(?:of|as low as|from|starting at|is|are|just|only|under)\\s+(?:just\\s+|only\\s+)?(?:\\$\\s?\\d|\\d+(?:\\.\\d+)?\\s?(?:%|percent))", "remove": true},
+        {"re": "\\b(?:zero|nothing|0%?)\\s+down\\b|\\bno\\s+money\\s+down\\b", "remove": true},
+        {"re": "\\b\\d{2,3}\\s+(?:monthly\\s+)?payments\\b", "remove": true}
       ]
     },
     "copy": {
@@ -163,10 +199,10 @@
       "fixLabel": "Make it a neutral explainer",
       "tweakNote": "Make it a neutral explainer: what it does and what each side says, never how to vote; no candidates or parties.",
       "phrases": [
-        { "re": "\\bvote\\s+(?:yes|no|for|against)\\b" },
-        { "re": "\\b(?:yes|no)\\s+on\\s+(?:amendment\\s+)?\\d+\\b" },
-        { "re": "\\b(?:DeSantis|Donalds|Trump|Biden|Obama|Newsom|MAGA|GOP|Republicans?|Democrats?|Democratic Party)\\b", "case": true },
-        { "re": "\\b(?:Byron Donalds|David Jolly|Jay Collins|Ashley Moody|Jason Pizzo|Kamala Harris|J\\.?D\\.? Vance|Casey DeSantis)\\b", "case": true }
+        {"re": "\\bvote\\s+(?:yes|no|for|against)\\b"},
+        {"re": "\\b(?:yes|no)\\s+on\\s+(?:amendment\\s+)?\\d+\\b"},
+        {"re": "\\b(?:DeSantis|Donalds|Trump|Biden|Obama|Newsom|MAGA|GOP|Republicans?|Democrats?|Democratic Party)\\b", "case": true},
+        {"re": "\\b(?:Byron Donalds|David Jolly|Jay Collins|Ashley Moody|Jason Pizzo|Kamala Harris|J\\.?D\\.? Vance|Casey DeSantis)\\b", "case": true}
       ]
     },
     "music": {
@@ -175,12 +211,12 @@
       "text": "Check the music: '{match}'",
       "fixLabel": "Use original audio",
       "replace": "Original audio, or a sound marked for business use",
-      "safe": "original\\s+(?:audio|sound)|your\\s+(?:own\\s+)?voice|voice-?over|no\\s+music|commercial\\s+music\\s+library|cleared\\s+for\\s+business|business\\s+use|approved\\s+for\\s+business|royalty[- ]free|\\bCML\\b",
+      "safe": "original\\s+(?:audio|sound)|your\\s+(?:own\\s+)?voice|voice-?over|no\\s+music|commercial\\s+(?:music\\s+)?library|business\\s+accounts?|cleared\\s+for\\s+business|business\\s+use|approved\\s+for\\s+business|royalty[- ]free|\\bCML\\b",
       "named": [
-        { "re": "[\"“”]" },
-        { "re": "(?:^|\\s)['‘][^'‘’]{2,}['’]" },
-        { "re": "\\bby\\s+[A-Z]", "case": true },
-        { "re": "\\b(?:song|track|remix|hit|single|album|trending\\s+sound|trending\\s+audio|popular\\s+sound|viral\\s+sound)\\b" }
+        {"re": "[\"“”]"},
+        {"re": "(?:^|\\s)['‘][^'‘’]{2,}['’]"},
+        {"re": "\\bby\\s+[A-Z]", "case": true},
+        {"re": "\\b(?:song|track|remix|hit|single|album|trending\\s+sound|trending\\s+audio|popular\\s+sound|viral\\s+sound)\\b"}
       ]
     },
     "lang": {

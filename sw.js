@@ -1,47 +1,40 @@
 // sw.js: offline, updates and the morning heads-up (design §3.17, §3.18).
 // The app's files are cached by build: cache-first on GitHub Pages (a new build installs in the background and takes over the next time
 // the app comes to the front, when the page asks with SKIP_WAITING), network-first on this Mac (BUILD "dev", so an edit shows at
-// once while offline still works). The API is network-first, its last good answers kept for offline. A push (empty, no payload) fetches
-// the morning headline with her token from IndexedDB within 5 s and always shows a notification, as Safari requires; a tap opens Today.
-const BUILD = "36d47c4";                       // stamped by tools/deploy.sh with the source commit
+// once while offline still works). The install is all or nothing: if one file fails, this build doesn't install, the build she has
+// keeps working (and its cache), and the browser tries again later. The API is never cached here: the app keeps its own copies on the
+// phone (localStorage), so an answer the page sees is always the server's own, and a failure is a failure it can show. A push (empty,
+// no payload) fetches the morning headline with her token from IndexedDB within 5 s and always shows a notification, as Safari
+// requires; a tap opens Today.
+const BUILD = "582cf04";                       // stamped by tools/deploy.sh with the source commit
 const CACHE = "jarvis-" + BUILD;
-const API_CACHE = "jarvis-api";
 const DEV = BUILD === "dev";
 // every file of the site (written by tools/deploy.sh); on this Mac, the shell only, and the rest is cached as it is used
 const SHELL = [/*SHELL*/"./", "api.js", "app.css", "app.js", "config.js", "data/fair-housing.json", "fonts/bricolage-grotesque-latin.woff2", "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "index.html", "manifest.webmanifest", "push.js", "router.js", "rules.js", "shared/compliance.js", "shared/ids.js", "shared/links.js", "shared/models.js", "shared/numbers.js", "shared/text.js", "shared/time.js", "store.js", "ui.js", "views/invite.js", "views/onboarding.js", "views/plan.js", "views/prompter.js", "views/script.js", "views/studio.js", "views/today.js", "views/welcome.js", "views/you.js"/*/SHELL*/];
 
 self.addEventListener("install", e => {
-  e.waitUntil((async () => {
-    const c = await caches.open(CACHE);
-    // one by one, fresh from the network (not the HTTP cache): a missing file never blocks the install
-    await Promise.all(SHELL.map(u => fetch(new Request(u, { cache: "reload" })).then(r => (r.ok ? c.put(u, r) : null)).catch(() => null)));
-  })());
+  // every file, fresh from the network (not the HTTP cache), all or nothing: a failed file fails this install, so the old build and
+  // its cache stay in charge and nothing she has opened before stops working offline
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: "reload" })))));
 });
 
 self.addEventListener("activate", e => {
   e.waitUntil((async () => {
-    for (const k of await caches.keys()) if (k.startsWith("jarvis-") && k !== CACHE && k !== API_CACHE) await caches.delete(k);
+    // older builds, and the API answers earlier builds kept ("jarvis-api")
+    for (const k of await caches.keys()) if (k.startsWith("jarvis-") && k !== CACHE) await caches.delete(k);
     await self.clients.claim();
   })());
 });
 
 self.addEventListener("message", e => {
   if (e.data && e.data.type === "SKIP_WAITING") self.skipWaiting();
-  if (e.data && e.data.type === "SIGNED_OUT") e.waitUntil(caches.delete(API_CACHE));
 });
-
-const isApi = url => url.origin !== self.location.origin && /\/api\/v1\//.test(url.pathname);
 
 self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (isApi(url)) {
-    if (url.pathname.endsWith("/health") || url.searchParams.get("headline") === "1") return;   // always live
-    e.respondWith(networkFirst(req, API_CACHE));
-    return;
-  }
-  if (url.origin !== self.location.origin) return;                                              // thumbnails and the like: the browser's own
+  if (url.origin !== self.location.origin) return;          // the API (never cached here), thumbnails and the like: straight to the network
   if (req.mode === "navigate") { e.respondWith(page(req)); return; }
   if (DEV || url.pathname.includes("/fixtures/")) { e.respondWith(networkFirst(req, CACHE)); return; }
   e.respondWith(cacheFirst(req));

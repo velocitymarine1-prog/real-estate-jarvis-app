@@ -22,8 +22,9 @@ export default {
   async mount(root, route) {
     const id = route.arg;
     const from = ["today", "studio", "plan"].includes(route.query.from) ? route.query.from : "studio";
-    const st = { row: store.idea(id), work: null, findings: [], C: null, R: null, writing: null, error: null, refs: null, refsErr: false,
-      dirty: false, saving: false, saveNote: "", gone: false };
+    const st = { row: store.ideaOrBriefing(id), work: null, findings: [], C: null, R: null, writing: null, error: null, refs: null, refsErr: false,
+      dirty: false, savingP: null, tooBig: false, saveNote: "", gone: false, unreachable: false };
+    store.live.editing = id;                       // app.js leaves this idea's unsaved edits to this page
     let alive = true;
     const timers = {};
     const els = {};
@@ -36,9 +37,13 @@ export default {
       const y = window.scrollY;
       const row = st.row;
       if (!row) {
-        replace(root, backLink(), st.gone ? h("div", { class: "empty" }, icon("info", 34), h("p", { text: "This idea isn't here anymore. It may have been removed on another phone." }),
-          h("a", { class: "btn lake", href: "#/" + from, text: "Back" })) : h("div", { class: "stack", "aria-busy": "true" }, skeleton(3), skeleton(6)));
-        replace(els.bar || (els.bar = h("div")));
+        replace(root, backLink(),
+          st.gone ? h("div", { class: "empty" }, icon("info", 34), h("p", { text: "This idea isn't here anymore. It may have been removed on another phone." }),
+            h("a", { class: "btn lake", href: "#/" + from, text: "Back" }))
+          : st.unreachable ? h("div", { class: "empty" }, icon("offline", 34), h("p", { text: "Couldn't open this idea just now. Check your connection and try again." }),
+            button("Try again", { kind: "lake", icon: "refresh", onClick: () => location.reload() }))
+          : h("div", { class: "stack", "aria-busy": "true" }, skeleton(3), skeleton(6)));
+        if (els.bar) replace(els.bar);
         return;
       }
       const idea = row.idea || {};
@@ -69,7 +74,7 @@ export default {
 
     // a line she can edit: a textarea that grows with its text; typing re-runs the check, and the line is saved after a pause
     function field(get, set, { cls = "", label = "", rows = 1, onInput = null } = {}) {
-      const ta = h("textarea", { class: ["edit", cls], rows, value: get() == null ? "" : String(get()), "aria-label": label, spellcheck: true });
+      const ta = h("textarea", { class: ["edit", cls], rows, value: get() == null ? "" : String(get()), "aria-label": label, spellcheck: true, readOnly: !!st.writing });
       autogrow(ta);
       ta.addEventListener("input", () => { set(ta.value); if (onInput) onInput(ta.value); changed(); });
       ta.addEventListener("blur", () => flush());
@@ -147,7 +152,8 @@ export default {
       return String(v || "").split(/[\s,]+/).map(t => t.trim()).filter(Boolean).map(t => (t.startsWith("#") ? t : "#" + t)).slice(0, 10);
     }
     function shotList(s) {
-      const ticks = Array.isArray(st.row.shots) ? st.row.shots.slice() : [];
+      const v = st.row.versions && st.row.versions[st.row.current];
+      const ticks = (v && Array.isArray(v.shots) ? v.shots : Array.isArray(st.row.shots) ? st.row.shots : []).slice();
       return h("ul", { class: "shots" }, s.shotList.map((txt, i) => {
         const cb = h("input", { type: "checkbox", checked: !!ticks[i], "aria-label": txt });
         const li = h("li", {}, h("label", { class: ["shot", ticks[i] ? "done" : ""] }, cb, h("span", { text: txt })));
@@ -155,7 +161,7 @@ export default {
           ticks[i] = cb.checked;
           li.firstChild.classList.toggle("done", cb.checked);
           const all = s.shotList.map((_, k) => !!ticks[k]);
-          try { const r = await api("PATCH", `/ideas/${encodeURIComponent(id)}`, { shots: all }); if (r && r.idea) { st.row = { ...st.row, shots: r.idea.shots }; store.saveIdea({ ...r.idea }); } }
+          try { const r = await api("PATCH", `/ideas/${encodeURIComponent(id)}`, { shots: all }); if (r && r.idea) { st.row = { ...st.row, shots: r.idea.shots, versions: st.row._dirty ? st.row.versions : r.idea.versions }; store.saveIdea({ ...r.idea }); } }
           catch (e) { toast(e.kind === "offline" ? "You're offline: the tick will be lost. Try again when you're back." : e.reason); }
         });
         return li;
@@ -188,7 +194,7 @@ export default {
         if (x.fix && x.fix.label) {
           const b = button(x.fix.label, { kind: "ghost", cls: "fix wrap", onClick: () => applyFix(x) });
           b.setAttribute("data-act", "fix"); b.setAttribute("data-rule", x.rule);
-          if (x.fix.kind === "tweak" && (store.aiOff() || !store.live.online)) b.disabled = true;
+          if ((x.fix.kind === "tweak" && (store.aiOff() || !store.live.online)) || st.writing) b.disabled = true;
           li.append(b);
         }
         if (x.why) li.append(h("details", { class: "why" }, h("summary", { text: "Why" }), h("p", { text: x.why })));
@@ -304,41 +310,51 @@ export default {
 
     // ---------------------------------------------------------------- saving
     function changed() {
-      st.dirty = true;
+      st.dirty = true; st.tooBig = false;
       clearTimeout(timers.check); timers.check = setTimeout(drawCheck, 220);
       clearTimeout(timers.save); timers.save = setTimeout(flush, 1400);
       setSave("Editing…");
     }
     function setSave(t) { st.saveNote = t; if (els.save) els.save.textContent = t; }
-    async function flush() {
+    // flush(): the edits so far to the server. A save already on its way is waited for, then what changed since goes after it, so
+    // whatever follows (the prompter, a version switch, a tweak, the status) sees every edit. A save that fails keeps the edit on the
+    // phone, marked, for app.js to send again when the phone is back online.
+    function flush() {
       clearTimeout(timers.save);
-      if (!st.dirty || !st.work || st.saving) return;
-      st.saving = true; st.dirty = false;
+      if (st.savingP) return st.savingP.then(() => flush());
+      if (!st.dirty || !st.work) return Promise.resolve();
+      st.dirty = false;
       setSave("Saving…");
-      const body = { script: clone(st.work) };
-      try {
-        const r = await api("PATCH", `/ideas/${encodeURIComponent(id)}`, body);
-        if (r && r.idea) { st.row = { ...r.idea, _userText: st.row._userText }; store.saveIdea(r.idea); }
-        setSave(st.dirty ? "Editing…" : "All changes saved");
-      } catch (e) {
-        st.dirty = true;
-        setSave(e.kind === "offline" ? "Not saved yet: you're offline. It saves when you're back." : "Not saved yet. " + (e.reason || ""));
-        // keep the edit on this phone meanwhile, so the prompter and Copy have it
-        store.saveIdea({ ...st.row, script: clone(st.work), versions: (st.row.versions || []).map((v, i) => (i === st.row.current ? { ...v, script: clone(st.work) } : v)) });
-      } finally {
-        st.saving = false;
-        if (st.dirty && store.live.online) { clearTimeout(timers.save); timers.save = setTimeout(flush, 3000); }
-      }
+      const sent = clone(st.work);
+      st.savingP = (async () => {
+        try {
+          const r = await api("PATCH", `/ideas/${encodeURIComponent(id)}`, { script: sent });
+          if (r && r.idea) { store.saveIdea(r.idea, { clean: true }); st.row = { ...store.idea(id), _userText: st.row._userText }; }
+          setSave(st.dirty ? "Editing…" : "All changes saved");
+        } catch (e) {
+          st.dirty = true;
+          if (e.kind === "too_big") { st.tooBig = true; setSave("Not saved: that script is too long to save. Shorten it, and it saves."); }
+          else setSave(e.kind === "offline" ? "Not saved yet: you're offline. It saves when you're back." : "Not saved yet. " + (e.reason || ""));
+          // the edit stays on this phone, marked: the prompter and Copy have it, and it's sent again when the phone is back online
+          store.markDirty(id, clone(st.work), st.row);
+          st.row = { ...(store.idea(id) || st.row), _userText: st.row._userText };
+        }
+      })().finally(() => {
+        st.savingP = null;
+        if (alive && st.dirty && store.live.online && !st.tooBig) { clearTimeout(timers.save); timers.save = setTimeout(flush, 3000); }
+      });
+      return st.savingP;
     }
     function setRow(row, redraw) {
       st.row = { ...row, _userText: (st.row && st.row._userText) || row._userText };
-      store.saveIdea(row);
+      store.saveIdea(row, { clean: true });         // a new version or a switch replaces the script on purpose
       st.work = clone(current(row));
       if (redraw) drawAll();
     }
 
     // ---------------------------------------------------------------- the sticky bar
     function drawBar() {
+      if (!alive) return;
       if (!els.bar) els.bar = h("div", { class: "sticky" });
       if (!els.bar.isConnected) document.body.append(els.bar);
       const row = st.row;
@@ -349,6 +365,7 @@ export default {
       const copyBtn = button("Copy", { kind: "ghost", icon: "copy", ariaLabel: "Copy the whole script", disabled: !hasScript, onClick: () => copy(asText(st.work, row.idea), "Script copied") });
       copyBtn.setAttribute("data-act", "copy-script");
       const status = statusButton(row);
+      if (st.writing) status.disabled = true;
       replace(els.bar, h("div", { class: "in" }, prompter, copyBtn, status));
     }
     function statusButton(row) {
@@ -384,6 +401,7 @@ export default {
     }
     async function setStatus(s, postUrl) {
       await flush();
+      const was = st.row.status;
       const body = { status: s };
       if (s === "posted" && postUrl) body.postUrl = postUrl;
       try {
@@ -391,42 +409,61 @@ export default {
         if (r && r.idea) { st.row = { ...r.idea, _userText: st.row._userText }; store.saveIdea(r.idea); }
         if (s === "posted") event("posted");
         toast(s === "dismissed" ? "Removed from your Plan" : s === "saved" || s === "scripted" ? "Saved to your Plan" : `Marked ${STATUS_LABEL[s].toLowerCase()}`,
-          s === "dismissed" ? { action: { label: "Undo", run: () => setStatus("scripted") } } : {});
+          s === "dismissed" ? { action: { label: "Undo", run: () => undoStatus(was) } } : {});
         drawBar();
       } catch (e) { toast(e.reason); }
     }
 
+    // Undo works after she has left the page too: the row is put back whatever is on the screen
+    async function undoStatus(was) {
+      try {
+        const r = await api("PATCH", `/ideas/${encodeURIComponent(id)}`, { status: was || "saved" });
+        if (r && r.idea) { store.saveIdea(r.idea); if (alive) { st.row = { ...r.idea, _userText: st.row._userText }; drawBar(); } }
+        toast(`Back in ${STATUS_LABEL[(r && r.idea && r.idea.status) || was] || "your Plan"}`);
+      } catch (e) { toast(e.reason); }
+    }
     async function copy(text, done) { (await copyText(text)) ? toast(done) : toast("Couldn't copy. Press and hold the text to copy it."); }
 
     // ---------------------------------------------------------------- start
+    // the controls only (the check, the tweak chips, the bar): never the lines, so the keyboard and dictation stay where she is
+    function controls() {
+      if (!alive || !st.row) return;
+      if (!st.work) { drawAll(); return; }          // no script yet: nothing she types in
+      drawCheck();
+      const off = store.aiOff() || !store.live.online || !!st.writing;
+      for (const b of root.querySelectorAll("[data-tweak]")) b.disabled = off;
+      drawBar();
+    }
+
     drawAll();
     const { C, R } = await checker();
     if (!alive) return () => {};
     st.C = C; st.R = R;
-    if (st.row) { st.work = clone(current(st.row)); drawAll(); }
+    if (st.row) { st.work = clone(current(st.row)); if (st.row._dirty) st.dirty = true; drawAll(); }
     try {
       const r = await api("GET", `/ideas/${encodeURIComponent(id)}`);
       if (r && r.idea && alive) {
-        const keepWork = st.dirty;
-        st.row = { ...r.idea, _userText: st.row && st.row._userText };
-        store.saveIdea(r.idea);
-        if (!keepWork) st.work = clone(current(st.row));
-        drawAll();
+        store.saveIdea(r.idea);                        // a row with edits not yet sent keeps them (store.saveIdeas)
+        st.row = { ...store.idea(id), _userText: st.row && st.row._userText };
+        if (st.row._dirty) st.dirty = true;
+        if (!st.dirty) { st.work = clone(current(st.row)); drawAll(); } else controls();
       }
     } catch (e) {
       if (e.status === 404) { st.gone = true; st.row = null; store.dropIdea(id); drawAll(); }
-      else if (!st.row) { st.gone = true; drawAll(); }
+      else if (!st.row) { st.unreachable = true; drawAll(); }
     }
+    if (alive && st.dirty && store.live.online) flush();      // an edit made offline goes up now
     if (st.row && !st.work && route.query.write === "1" && !store.aiOff() && store.live.online) {
       history.replaceState(history.state, "", link("/idea/" + id, { from }));
       writeScript();
     }
     if (st.row) loadRefs();
-    const offs = [store.on("online", on => { if (on && st.dirty) flush(); drawAll(); })];
+    const offs = [store.on("online", on => { if (on && st.dirty) flush(); controls(); }), store.on("health", controls)];
     const onHide = () => { if (document.visibilityState === "hidden") flush(); };
     document.addEventListener("visibilitychange", onHide);
     return () => {
       alive = false; offs.forEach(f => f()); document.removeEventListener("visibilitychange", onHide);
+      if (store.live.editing === id) store.live.editing = null;
       clearTimeout(timers.check); flush();
       if (els.bar) els.bar.remove();
     };

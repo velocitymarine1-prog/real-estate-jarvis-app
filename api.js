@@ -17,9 +17,9 @@ export const SENTENCES = {
 };
 
 export class ApiError extends Error {
-  constructor(kind, reason, status = 0, error = "") {
+  constructor(kind, reason, status = 0, error = "", field = "") {
     super(reason || kind);
-    this.kind = kind; this.reason = reason || SENTENCES[kind] || SENTENCES.other; this.status = status; this.error = error;
+    this.kind = kind; this.reason = reason || SENTENCES[kind] || SENTENCES.other; this.status = status; this.error = error; this.field = field;
   }
 }
 
@@ -28,13 +28,15 @@ async function mock() { if (!mockModule) mockModule = await import("./mock.js");
 
 // errors from a JSON answer: the Worker's { error, reason }
 export function errorFor(status, data) {
-  const error = (data && data.error) || "", reason = (data && data.reason) || "";
+  const error = (data && data.error) || "", reason = (data && data.reason) || "", field = (data && data.field) || "";
   if (status === 401) return new ApiError("auth", SENTENCES.auth, status, error);
+  if (status === 413 || error === "too_big") return new ApiError("too_big", reason || "That's too long to save.", status, error, field);
+  if (error === "bad_profile" || error === "bad_field") return new ApiError("bad_field", reason || "Something there needs a look.", status, error, field);
   if (error === "not_connected") return new ApiError("not_connected", SENTENCES.not_connected, status, error);
   if (status === 422 || error === "declined") return new ApiError("declined", reason || SENTENCES.declined, status, error);
   if (error === "bad_link") return new ApiError("bad_link", reason || SENTENCES.bad_link, status, error);
   if (status === 503 || error === "busy") return new ApiError("busy", reason || SENTENCES.busy, status, error);
-  if (status === 429) return new ApiError("busy", reason || "That's a lot at once. Give it a minute and try again.", status, error);
+  if (status === 429) return new ApiError("busy", reason || "Slow down a moment, then try again.", status, error);
   if (status >= 500) return new ApiError("other", reason || SENTENCES.other, status, error);
   return new ApiError("other", reason || SENTENCES.other, status, error);
 }
