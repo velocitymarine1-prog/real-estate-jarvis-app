@@ -68,7 +68,7 @@ export default {
     if (n === 1) {
       const name = input("s-name", "firstName", "Your first name");
       const brk = input("s-brk", "brokerage", "As it appears on your license", v => { nextBtn.disabled = !v.trim(); });
-      const team = input("s-team", "team", "Optional, e.g. The Javi Group");
+      const team = input("s-team", "team", "Optional, e.g. The Giavi Group");
       const nextBtn = frame(`Hi${p.firstName ? ", " + p.firstName : ""}! Let's set ${SHORT_NAME} up for you.`, "Five quick questions. Everything can be changed later in You.",
         h("div", { class: "stack" },
           field("What should Jarvis call you?", name),

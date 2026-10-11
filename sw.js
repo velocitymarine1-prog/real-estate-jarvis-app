@@ -6,7 +6,7 @@
 // phone (localStorage), so an answer the page sees is always the server's own, and a failure is a failure it can show. A push (empty,
 // no payload) fetches the morning headline with her token from IndexedDB within 5 s and always shows a notification, as Safari
 // requires; a tap opens Today.
-const BUILD = "582cf04";                       // stamped by tools/deploy.sh with the source commit
+const BUILD = "dd86cca";                       // stamped by tools/deploy.sh with the source commit
 const CACHE = "jarvis-" + BUILD;
 const DEV = BUILD === "dev";
 // every file of the site (written by tools/deploy.sh); on this Mac, the shell only, and the rest is cached as it is used

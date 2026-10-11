@@ -218,13 +218,13 @@ export default {
     }
 
     // ---------------------------------------------------------------- the page
-    const team = text("Team name (optional)", "team", { placeholder: "e.g. The Javi Group", onInput: () => teamNote(), hint: "Florida lets a team use “Team” or “Group”, and the brokerage's name always shows with it." });
+    const team = text("Team name (optional)", "team", { placeholder: "e.g. The Giavi Group", onInput: () => teamNote(), hint: "Florida lets a team use “Team” or “Group”, and the brokerage's name always shows with it." });
     els.team = h("div");
     replace(root,
       h("h1", { class: "page-title", text: "You" }),
       els.save = h("p", { class: "save-state", "aria-live": "polite", text: "Changes save as you go" }),
       h("section", { class: "group" }, h("h2", { text: "About you" }),
-        text("Your first name", "firstName", { placeholder: "Javi" }),
+        text("Your first name", "firstName", { placeholder: "Giavi" }),
         text("Your brokerage's licensed name", "brokerage", { placeholder: "As it appears on your license", onInput: () => teamNote(),
           hint: "Florida needs it on every ad. The check makes sure it's in your caption." }),
         team, els.team),
